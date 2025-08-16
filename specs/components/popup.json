@@ -1,0 +1,18 @@
+{
+  "specification": {
+    "purpose": "Chrome extension component: popup",
+    "technology": {
+      "runtime": "Chrome Extension (Manifest V3)",
+      "language": "JavaScript"
+    }
+  },
+  "cc_instructions": {
+    "priority": 1,
+    "estimated_effort": "1-2 hours",
+    "file_outputs": [
+      "popup.html",
+      "popup.js",
+      "popup.css"
+    ]
+  }
+}

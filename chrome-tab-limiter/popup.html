@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Limiter Settings</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <header class="popup-header">
+            <h1>Tab Limiter</h1>
+        </header>
+        
+        <main class="popup-content">
+            <div class="status-section">
+                <div class="status-item">
+                    <span class="status-label">Current tabs:</span>
+                    <span class="status-value" id="currentTabCount">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Current limit:</span>
+                    <span class="status-value" id="currentLimit">-</span>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <div class="setting-item">
+                    <label for="tabLimitInput">Tab limit for this window:</label>
+                    <div class="input-group">
+                        <input type="number" id="tabLimitInput" min="1" max="100" placeholder="10">
+                        <button id="saveButton" class="save-btn">Save</button>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <label for="defaultLimitInput">Default limit for new windows:</label>
+                    <div class="input-group">
+                        <input type="number" id="defaultLimitInput" min="1" max="100" placeholder="10">
+                        <button id="saveDefaultButton" class="save-btn">Save</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="actions-section">
+                <button id="refreshButton" class="action-btn">Refresh Data</button>
+            </div>
+        </main>
+        
+        <footer class="popup-footer">
+            <div class="status-message" id="statusMessage"></div>
+        </footer>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>
