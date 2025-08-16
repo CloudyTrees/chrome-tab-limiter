@@ -10,7 +10,7 @@ function debugLog(...args) {
 }
 
 // Import storage functions (note: in Chrome extensions, import/export works differently)
-// We'll access the storage functions directly from chrome.storage
+// We'll access the storage functions directly from chrome.storage.local (local storage only)
 
 // DOM elements
 let currentTabCountElement;
@@ -28,6 +28,15 @@ let currentWindowId = null;
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('Popup initializing...');
+
+// Privacy-focused error handling - never log user data
+function safeErrorLog(message, error) {
+    if (DEBUG_MODE) {
+        console.error(message, error?.name || 'Unknown error');
+    } else {
+        console.error(message);
+    }
+}
     
     // Get DOM elements
     currentTabCountElement = document.getElementById('currentTabCount');
@@ -73,7 +82,7 @@ async function loadInitialData() {
         setTimeout(() => clearMessage(), 2000);
         
     } catch (error) {
-        console.error('Error loading initial data:', error);
+        safeErrorLog('Error loading initial data', error);
         showMessage('Error loading data', 'error');
     }
 }
@@ -88,7 +97,7 @@ async function updateTabCount() {
         
         return tabCount;
     } catch (error) {
-        console.error('Error updating tab count:', error);
+        safeErrorLog('Error updating tab count', error);
         currentTabCountElement.textContent = 'Error';
         return 0;
     }
@@ -99,7 +108,7 @@ async function loadLimits() {
     try {
         // Get current window limit
         const windowLimitKey = `tabLimit_${currentWindowId}`;
-        const result = await chrome.storage.sync.get([windowLimitKey, 'defaultTabLimit']);
+        const result = await chrome.storage.local.get([windowLimitKey, 'defaultTabLimit']);
         
         const currentLimit = result[windowLimitKey] || result.defaultTabLimit || 10;
         const defaultLimit = result.defaultTabLimit || 10;
@@ -112,7 +121,7 @@ async function loadLimits() {
         defaultLimitInput.value = defaultLimit;
         
     } catch (error) {
-        console.error('Error loading limits:', error);
+        safeErrorLog('Error loading limits', error);
         currentLimitElement.textContent = 'Error';
         showMessage('Error loading limits', 'error');
     }
@@ -133,7 +142,7 @@ async function handleSaveTabLimit() {
         
         // Save to storage
         const windowLimitKey = `tabLimit_${currentWindowId}`;
-        await chrome.storage.sync.set({ [windowLimitKey]: limit });
+        await chrome.storage.local.set({ [windowLimitKey]: limit });
         
         // Update display
         currentLimitElement.textContent = limit;
@@ -142,7 +151,7 @@ async function handleSaveTabLimit() {
         setTimeout(() => clearMessage(), 2000);
         
     } catch (error) {
-        console.error('Error saving tab limit:', error);
+        safeErrorLog('Error saving tab limit', error);
         showMessage('Error saving tab limit', 'error');
     } finally {
         saveButton.disabled = false;
@@ -163,13 +172,13 @@ async function handleSaveDefaultLimit() {
         showMessage('Saving default...', 'info');
         
         // Save to storage
-        await chrome.storage.sync.set({ defaultTabLimit: limit });
+        await chrome.storage.local.set({ defaultTabLimit: limit });
         
         showMessage('Default limit saved successfully', 'success');
         setTimeout(() => clearMessage(), 2000);
         
     } catch (error) {
-        console.error('Error saving default limit:', error);
+        safeErrorLog('Error saving default limit', error);
         showMessage('Error saving default limit', 'error');
     } finally {
         saveDefaultButton.disabled = false;
@@ -185,7 +194,7 @@ async function handleRefresh() {
         await loadInitialData();
         
     } catch (error) {
-        console.error('Error refreshing data:', error);
+        safeErrorLog('Error refreshing data', error);
         showMessage('Error refreshing data', 'error');
     } finally {
         refreshButton.disabled = false;

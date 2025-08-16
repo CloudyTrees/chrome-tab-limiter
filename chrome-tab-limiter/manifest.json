@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tab Limiter",
   "version": "1.0.0",
-  "description": "Limit the number of open tabs per window",
+  "description": "Limit the number of open tabs per window (data stored locally only)",
   "permissions": [
     "tabs",
     "storage",

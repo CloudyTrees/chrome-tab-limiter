@@ -55,6 +55,15 @@ function debugLog(...args) {
 
 debugLog('Background service worker starting...');
 
+// Privacy-focused error handling - never log user data
+function safeErrorLog(message, error) {
+    if (DEBUG_MODE) {
+        console.error(message, error?.name || 'Unknown error');
+    } else {
+        console.error(message);
+    }
+}
+
 // Initialize tab counts for all windows on startup
 async function initializeTabCounts() {
     try {
@@ -68,7 +77,7 @@ async function initializeTabCounts() {
         
         debugLog('Tab counts initialized:', Object.fromEntries(tabCounts));
     } catch (error) {
-        console.error('Error initializing tab counts:', error);
+        safeErrorLog('Error initializing tab counts', error);
     }
 }
 
@@ -103,7 +112,7 @@ async function openTabSelector(windowId, newTabId) {
             return;
         }
         
-        debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId}, new tab ${newTabId}`);
+        debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId}`);
         
         // Create selector popup window
         const popup = await chrome.windows.create({
@@ -120,14 +129,14 @@ async function openTabSelector(windowId, newTabId) {
         return popup.id;
         
     } catch (error) {
-        console.error('Error opening tab selector:', error);
+        safeErrorLog('Error opening tab selector', error);
         
         // Fallback: just close the new tab
         try {
             await chrome.tabs.remove(newTabId);
-            debugLog(`Fallback: Closed new tab ${newTabId}`);
+            debugLog('Fallback: Closed new tab');
         } catch (removeError) {
-            console.error('Error removing tab in fallback:', removeError);
+            safeErrorLog('Error removing tab in fallback', removeError);
         }
     }
 }
@@ -141,7 +150,7 @@ async function handleTabCreated(tab) {
             return;
         }
         
-        debugLog(`Tab created: ${tab.id} in window ${tab.windowId}`);
+        debugLog(`Tab created in window ${tab.windowId}`);
         
         // Check if this would exceed the limit
         if (await wouldExceedLimit(tab.windowId)) {
@@ -161,14 +170,14 @@ async function handleTabCreated(tab) {
         updateTabCount(tab.windowId, 1);
         
     } catch (error) {
-        console.error('Error handling tab creation:', error);
+        safeErrorLog('Error handling tab creation', error);
     }
 }
 
 // Handle tab removal
 function handleTabRemoved(tabId, removeInfo) {
     try {
-        debugLog(`Tab removed: ${tabId} from window ${removeInfo.windowId}`);
+        debugLog(`Tab removed from window ${removeInfo.windowId}`);
         
         // Remove from pending tabs if it was pending
         pendingTabs.delete(tabId);
@@ -179,7 +188,7 @@ function handleTabRemoved(tabId, removeInfo) {
         }
         
     } catch (error) {
-        console.error('Error handling tab removal:', error);
+        safeErrorLog('Error handling tab removal', error);
     }
 }
 
@@ -197,7 +206,7 @@ async function handleWindowRemoved(windowId) {
         debugLog('Window cleanup completed for:', windowId);
         
     } catch (error) {
-        console.error('Error handling window removal:', error);
+        safeErrorLog('Error handling window removal', error);
     }
 }
 
@@ -216,7 +225,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Validate required fields based on action
         const validationResult = validateMessageRequest(request);
         if (!validationResult.valid) {
-            console.warn('Message validation failed:', validationResult.error);
+            console.warn('Message validation failed');
             sendResponse({ success: false, error: 'Invalid message data' });
             return;
         }
@@ -241,7 +250,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 break;
                 
             default:
-                console.warn('Unknown message action:', request.action);
+                console.warn('Unknown message action received');
                 sendResponse({ success: false, error: 'Unknown action' });
         }
         
@@ -249,7 +258,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
         
     } catch (error) {
-        console.error('Error processing message:', error.name);
+        safeErrorLog('Error processing message', error);
         sendResponse({ success: false, error: 'Internal error' });
     }
 });
@@ -296,11 +305,11 @@ function validateMessageRequest(request) {
 // Handle tab selection from selector window
 async function handleTabSelected(selectedTabId, windowId, newTabId) {
     try {
-        debugLog(`User selected tab ${selectedTabId} to close, keeping new tab ${newTabId}`);
+        debugLog('User selected tab to close');
         
         // Remove the selected tab
         await chrome.tabs.remove(selectedTabId);
-        debugLog(`Closed selected tab: ${selectedTabId}`);
+        debugLog('Closed selected tab');
         
         // Remove new tab from pending
         pendingTabs.delete(newTabId);
@@ -309,15 +318,15 @@ async function handleTabSelected(selectedTabId, windowId, newTabId) {
         debugLog(`Tab counts remain unchanged for window ${windowId}`);
         
     } catch (error) {
-        console.error('Error handling tab selection:', error);
+        safeErrorLog('Error handling tab selection', error);
         
         // Fallback: remove the new tab
         try {
             await chrome.tabs.remove(newTabId);
             pendingTabs.delete(newTabId);
-            debugLog(`Fallback: Removed new tab ${newTabId}`);
+            debugLog('Fallback: Removed new tab');
         } catch (fallbackError) {
-            console.error('Error in fallback tab removal:', fallbackError);
+            safeErrorLog('Error in fallback tab removal', fallbackError);
         }
     }
 }
@@ -325,11 +334,11 @@ async function handleTabSelected(selectedTabId, windowId, newTabId) {
 // Handle cancel selection from selector window
 async function handleCancelSelection(newTabId, windowId) {
     try {
-        debugLog(`User canceled, removing new tab ${newTabId}`);
+        debugLog('User canceled, removing new tab');
         
         // Remove the new tab
         await chrome.tabs.remove(newTabId);
-        debugLog(`Canceled: Removed new tab ${newTabId}`);
+        debugLog('Canceled: Removed new tab');
         
         // Remove from pending
         pendingTabs.delete(newTabId);
@@ -338,7 +347,7 @@ async function handleCancelSelection(newTabId, windowId) {
         debugLog(`Tab count unchanged for window ${windowId}`);
         
     } catch (error) {
-        console.error('Error handling cancel selection:', error);
+        safeErrorLog('Error handling cancel selection', error);
     }
 }
 

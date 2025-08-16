@@ -25,6 +25,15 @@ let tabLimitElement;
 // Initialize selector window when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('Selector initializing...');
+
+// Privacy-focused error handling - never log user data
+function safeErrorLog(message, error) {
+    if (DEBUG_MODE) {
+        console.error(message, error?.name || 'Unknown error');
+    } else {
+        console.error(message);
+    }
+}
     
     // Get DOM elements
     tabListElement = document.getElementById('tabList');
@@ -45,12 +54,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     newTabId = parseInt(params.get('newTabId'));
     
     if (!windowId || !newTabId) {
-        console.error('Missing required parameters: windowId or newTabId');
+        safeErrorLog('Missing required parameters');
         showError('Invalid parameters provided');
         return;
     }
     
-    debugLog(`Selector opened for window ${windowId}, new tab ${newTabId}`);
+    debugLog(`Selector opened for window ${windowId}`);
     
     // Load tabs and display
     await loadAndDisplayTabs();
@@ -76,7 +85,7 @@ async function loadAndDisplayTabs() {
         displayTabs(allTabs);
         
     } catch (error) {
-        console.error('Error loading tabs:', error);
+        safeErrorLog('Error loading tabs', error);
         showError('Failed to load tabs');
     }
 }
@@ -85,13 +94,13 @@ async function loadAndDisplayTabs() {
 async function loadTabLimit() {
     try {
         const windowLimitKey = `tabLimit_${windowId}`;
-        const result = await chrome.storage.sync.get([windowLimitKey, 'defaultTabLimit']);
+        const result = await chrome.storage.local.get([windowLimitKey, 'defaultTabLimit']);
         
         const limit = result[windowLimitKey] || result.defaultTabLimit || 10;
         tabLimitElement.textContent = limit;
         
     } catch (error) {
-        console.error('Error loading tab limit:', error);
+        safeErrorLog('Error loading tab limit', error);
         tabLimitElement.textContent = '--';
     }
 }
@@ -250,13 +259,13 @@ function handleTabSelection(tabId, index) {
     // Enable confirm button
     confirmButton.disabled = false;
     
-    debugLog(`Tab selected: ${tabId}`);
+    debugLog('Tab selected');
 }
 
 // Handle confirm button click
 async function handleConfirm() {
     if (!selectedTabId) {
-        console.error('No tab selected');
+        safeErrorLog('No tab selected');
         return;
     }
     
@@ -264,7 +273,7 @@ async function handleConfirm() {
         confirmButton.disabled = true;
         confirmButton.textContent = 'Closing...';
         
-        debugLog(`Sending message to close tab ${selectedTabId}`);
+        debugLog('Sending message to close selected tab');
         
         // Send message to background script with error handling
         const response = await chrome.runtime.sendMessage({
@@ -282,7 +291,7 @@ async function handleConfirm() {
         window.close();
         
     } catch (error) {
-        console.error('Error closing tab:', error);
+        safeErrorLog('Error closing tab', error);
         confirmButton.disabled = false;
         confirmButton.textContent = 'Close Selected Tab';
         showError('Failed to close tab');
@@ -295,7 +304,7 @@ async function handleCancel() {
         cancelButton.disabled = true;
         cancelButton.textContent = 'Canceling...';
         
-        debugLog(`Sending message to cancel and close new tab ${newTabId}`);
+        debugLog('Sending message to cancel and close new tab');
         
         // Send message to background script with error handling
         const response = await chrome.runtime.sendMessage({
@@ -312,7 +321,7 @@ async function handleCancel() {
         window.close();
         
     } catch (error) {
-        console.error('Error canceling:', error);
+        safeErrorLog('Error canceling', error);
         cancelButton.disabled = false;
         cancelButton.textContent = 'Cancel (Close New Tab)';
         showError('Failed to cancel');
