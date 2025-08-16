@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Limiter - Select Tab to Close</title>
+    <link rel="stylesheet" href="selector.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="warning-icon">⚠️</div>
+            <h1>Tab Limit Reached!</h1>
+            <p class="subtitle">This window has exceeded its <span id="tabLimit">--</span> tab limit</p>
+        </header>
+        
+        <main class="content">
+            <div class="instruction">
+                <p>Select a tab to close to make room for the new tab:</p>
+            </div>
+            
+            <div class="tab-list-container">
+                <div id="tabList" class="tab-list">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading tabs...</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <footer class="actions">
+            <button id="confirmButton" class="confirm-btn" disabled>Close Selected Tab</button>
+            <button id="cancelButton" class="cancel-btn">Cancel (Close New Tab)</button>
+        </footer>
+        
+        <div class="help-text">
+            <p><strong>Tip:</strong> Use keyboard arrows to navigate, Enter to confirm, or Escape to cancel</p>
+        </div>
+    </div>
+    
+    <script src="selector.js"></script>
+</body>
+</html>

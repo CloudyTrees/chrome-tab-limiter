@@ -19,8 +19,8 @@
   ],
   "current_context": {
     "open_questions": [],
-    "working_on": "background",
-    "last_discussion": "Starting background service worker implementation",
-    "updated_at": "2025-08-16T15:17:18.127268"
+    "working_on": "selector",
+    "last_discussion": "Starting selector window implementation - final component",
+    "updated_at": "2025-08-16T15:36:45.562748"
   }
 }
