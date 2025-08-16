@@ -1,5 +1,14 @@
 // Popup script for Tab Limiter extension
 
+// Debug logging configuration
+const DEBUG_MODE = false; // Set to false in production
+
+function debugLog(...args) {
+    if (DEBUG_MODE) {
+        console.log('[Tab Limiter Popup]', ...args);
+    }
+}
+
 // Import storage functions (note: in Chrome extensions, import/export works differently)
 // We'll access the storage functions directly from chrome.storage
 
@@ -18,7 +27,7 @@ let currentWindowId = null;
 
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('Tab Limiter popup initializing...');
+    debugLog('Popup initializing...');
     
     // Get DOM elements
     currentTabCountElement = document.getElementById('currentTabCount');
@@ -42,7 +51,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initial data load
     await loadInitialData();
     
-    console.log('Tab Limiter popup initialized');
+    debugLog('Popup initialized');
 });
 
 // Load initial data for the popup
@@ -112,7 +121,7 @@ async function loadLimits() {
 // Handle saving tab limit for current window
 async function handleSaveTabLimit() {
     try {
-        const limit = parseInt(tabLimitInput.value);
+        const limit = sanitizeNumericInput(tabLimitInput.value);
         
         if (!validateLimit(limit)) {
             showMessage('Please enter a valid limit (1-100)', 'error');
@@ -143,7 +152,7 @@ async function handleSaveTabLimit() {
 // Handle saving default limit for new windows
 async function handleSaveDefaultLimit() {
     try {
-        const limit = parseInt(defaultLimitInput.value);
+        const limit = sanitizeNumericInput(defaultLimitInput.value);
         
         if (!validateLimit(limit)) {
             showMessage('Please enter a valid default limit (1-100)', 'error');
@@ -183,14 +192,36 @@ async function handleRefresh() {
     }
 }
 
-// Validate limit value
+// Enhanced limit validation with input sanitization
 function validateLimit(limit) {
-    return Number.isInteger(limit) && limit >= 1 && limit <= 100;
+    // Ensure it's a safe integer
+    if (!Number.isSafeInteger(limit)) {
+        return false;
+    }
+    
+    // Check range
+    return limit >= 1 && limit <= 100;
+}
+
+// Sanitize numeric input to prevent injection
+function sanitizeNumericInput(input) {
+    if (typeof input !== 'string' && typeof input !== 'number') {
+        return NaN;
+    }
+    
+    // Convert to string and remove any non-digit characters
+    const sanitized = String(input).replace(/[^\d]/g, '');
+    
+    // Parse as integer
+    const num = parseInt(sanitized, 10);
+    
+    // Return NaN for invalid inputs
+    return isNaN(num) ? NaN : num;
 }
 
 // Validate tab limit input
 function validateTabLimitInput() {
-    const value = parseInt(tabLimitInput.value);
+    const value = sanitizeNumericInput(tabLimitInput.value);
     const isValid = validateLimit(value);
     
     saveButton.disabled = !isValid;
@@ -204,7 +235,7 @@ function validateTabLimitInput() {
 
 // Validate default limit input
 function validateDefaultLimitInput() {
-    const value = parseInt(defaultLimitInput.value);
+    const value = sanitizeNumericInput(defaultLimitInput.value);
     const isValid = validateLimit(value);
     
     saveDefaultButton.disabled = !isValid;

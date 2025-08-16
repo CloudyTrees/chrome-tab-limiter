@@ -1,5 +1,14 @@
 // Selector window script for Tab Limiter extension
 
+// Debug logging configuration
+const DEBUG_MODE = false; // Set to false in production
+
+function debugLog(...args) {
+    if (DEBUG_MODE) {
+        console.log('[Tab Limiter Selector]', ...args);
+    }
+}
+
 // Global variables
 let windowId = null;
 let newTabId = null;
@@ -15,7 +24,7 @@ let tabLimitElement;
 
 // Initialize selector window when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('Tab selector initializing...');
+    debugLog('Selector initializing...');
     
     // Get DOM elements
     tabListElement = document.getElementById('tabList');
@@ -41,12 +50,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
     
-    console.log(`Selector opened for window ${windowId}, new tab ${newTabId}`);
+    debugLog(`Selector opened for window ${windowId}, new tab ${newTabId}`);
     
     // Load tabs and display
     await loadAndDisplayTabs();
     
-    console.log('Tab selector initialized');
+    debugLog('Selector initialized');
 });
 
 // Load tabs for the current window and display them
@@ -58,7 +67,7 @@ async function loadAndDisplayTabs() {
         // Filter out the new tab
         allTabs = tabs.filter(tab => tab.id !== newTabId);
         
-        console.log(`Found ${allTabs.length} tabs to display (excluding new tab)`);
+        debugLog(`Found ${allTabs.length} tabs to display (excluding new tab)`);
         
         // Get the tab limit for this window
         await loadTabLimit();
@@ -122,8 +131,8 @@ function createTabItem(tab, index) {
     // Create favicon element
     const faviconElement = createFaviconElement(tab);
     
-    // Truncate title and URL for display
-    const title = tab.title || 'Untitled';
+    // Sanitize and truncate title and URL for display
+    const title = sanitizeTabTitle(tab.title);
     const url = getDisplayUrl(tab.url);
     
     tabItem.innerHTML = `
@@ -146,21 +155,90 @@ function createTabItem(tab, index) {
 
 // Create favicon element with fallback
 function createFaviconElement(tab) {
-    if (tab.favIconUrl && !tab.favIconUrl.startsWith('chrome://')) {
-        return `<img src="${escapeHtml(tab.favIconUrl)}" class="favicon" alt="favicon">`;
+    if (tab.favIconUrl && isValidFaviconUrl(tab.favIconUrl)) {
+        return `<img src="${escapeHtml(tab.favIconUrl)}" class="favicon" alt="favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+                <div class="favicon default" style="display:none;">🌐</div>`;
     } else {
         // Use default icon
         return '<div class="favicon default">🌐</div>';
     }
 }
 
-// Get display-friendly URL
-function getDisplayUrl(url) {
+// Validate favicon URLs to prevent malicious content
+function isValidFaviconUrl(url) {
     try {
         const urlObj = new URL(url);
-        return urlObj.hostname || url;
+        
+        // Only allow specific schemes
+        const allowedSchemes = ['http:', 'https:', 'data:', 'chrome://'];
+        if (!allowedSchemes.includes(urlObj.protocol)) {
+            return false;
+        }
+        
+        // Block chrome:// URLs except favicon
+        if (urlObj.protocol === 'chrome:' && !url.startsWith('chrome://favicon/')) {
+            return false;
+        }
+        
+        // For data URLs, only allow image types
+        if (urlObj.protocol === 'data:') {
+            const mimeMatch = url.match(/^data:([^;]+)/);
+            if (!mimeMatch || !mimeMatch[1].startsWith('image/')) {
+                return false;
+            }
+        }
+        
+        // Basic length check to prevent excessively long URLs
+        if (url.length > 2048) {
+            return false;
+        }
+        
+        return true;
     } catch (error) {
-        return url;
+        return false;
+    }
+}
+
+// Get display-friendly URL with security validation
+function getDisplayUrl(url) {
+    try {
+        // Validate URL first
+        if (!isValidDisplayUrl(url)) {
+            return '[Invalid URL]';
+        }
+        
+        const urlObj = new URL(url);
+        return urlObj.hostname || '[Unknown Host]';
+    } catch (error) {
+        return '[Invalid URL]';
+    }
+}
+
+// Validate URLs before displaying to prevent malicious content
+function isValidDisplayUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        
+        // Only allow standard web schemes and some chrome schemes
+        const allowedSchemes = ['http:', 'https:', 'file:', 'ftp:', 'chrome:', 'chrome-extension:'];
+        if (!allowedSchemes.includes(urlObj.protocol)) {
+            return false;
+        }
+        
+        // Basic length check
+        if (url.length > 2048) {
+            return false;
+        }
+        
+        // Don't allow URLs with suspicious characters that could be used for homograph attacks
+        const suspiciousPattern = /[\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/;
+        if (suspiciousPattern.test(url)) {
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        return false;
     }
 }
 
@@ -172,7 +250,7 @@ function handleTabSelection(tabId, index) {
     // Enable confirm button
     confirmButton.disabled = false;
     
-    console.log(`Tab selected: ${tabId}`);
+    debugLog(`Tab selected: ${tabId}`);
 }
 
 // Handle confirm button click
@@ -186,15 +264,19 @@ async function handleConfirm() {
         confirmButton.disabled = true;
         confirmButton.textContent = 'Closing...';
         
-        console.log(`Sending message to close tab ${selectedTabId}`);
+        debugLog(`Sending message to close tab ${selectedTabId}`);
         
-        // Send message to background script
-        await chrome.runtime.sendMessage({
+        // Send message to background script with error handling
+        const response = await chrome.runtime.sendMessage({
             action: 'tabSelected',
             tabId: selectedTabId,
             windowId: windowId,
             newTabId: newTabId
         });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.error || 'Failed to close tab');
+        }
         
         // Close this selector window
         window.close();
@@ -213,14 +295,18 @@ async function handleCancel() {
         cancelButton.disabled = true;
         cancelButton.textContent = 'Canceling...';
         
-        console.log(`Sending message to cancel and close new tab ${newTabId}`);
+        debugLog(`Sending message to cancel and close new tab ${newTabId}`);
         
-        // Send message to background script
-        await chrome.runtime.sendMessage({
+        // Send message to background script with error handling
+        const response = await chrome.runtime.sendMessage({
             action: 'cancelSelection',
             newTabId: newTabId,
             windowId: windowId
         });
+        
+        if (!response || !response.success) {
+            throw new Error(response?.error || 'Failed to cancel');
+        }
         
         // Close this selector window
         window.close();
@@ -318,9 +404,38 @@ function showError(message) {
     `;
 }
 
-// Escape HTML to prevent XSS
+// Enhanced HTML escaping and input sanitization to prevent XSS
 function escapeHtml(text) {
+    if (typeof text !== 'string') {
+        text = String(text);
+    }
+    
+    // Limit length to prevent DoS
+    if (text.length > 1000) {
+        text = text.substring(0, 997) + '...';
+    }
+    
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Sanitize tab titles for display
+function sanitizeTabTitle(title) {
+    if (!title || typeof title !== 'string') {
+        return 'Untitled';
+    }
+    
+    // Remove control characters and other problematic characters
+    const sanitized = title
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') // Zero-width characters
+        .trim();
+    
+    // Limit length
+    if (sanitized.length > 100) {
+        return sanitized.substring(0, 97) + '...';
+    }
+    
+    return sanitized || 'Untitled';
 }
