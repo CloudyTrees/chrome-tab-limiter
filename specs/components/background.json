@@ -1,0 +1,83 @@
+{
+  "specification": {
+    "component": "background",
+    "purpose": "Service worker that manages tab counting and limit enforcement per window",
+    "version": "1.0",
+    "technology": {
+      "runtime": "Chrome Extension Service Worker (Manifest V3)",
+      "language": "JavaScript"
+    },
+    "requirements": [
+      "Track tab count per window independently",
+      "Listen to tab creation events",
+      "Check against stored limits when new tab created",
+      "Open selector window when limit exceeded",
+      "Handle tab removal after user selection",
+      "Clean up data for closed windows"
+    ]
+  },
+  "cc_instructions": {
+    "priority": 1,
+    "estimated_effort": "2 hours",
+    "file_outputs": [
+      "chrome-tab-limiter/background.js",
+      "chrome-tab-limiter/utils/storage.js"
+    ],
+    "implementation_order": [
+      "Create storage.js with get/set functions for tab limits",
+      "Set up background.js service worker structure",
+      "Implement tab counting per window",
+      "Add tab creation listener",
+      "Implement limit checking logic",
+      "Add placeholder for selector window opening",
+      "Handle window close cleanup"
+    ],
+    "specific_requirements": {
+      "storage_functions": {
+        "getTabLimit": "Get limit for specific window (default 10)",
+        "setTabLimit": "Set limit for specific window",
+        "getDefaultLimit": "Get default limit for new windows",
+        "setDefaultLimit": "Set default limit"
+      },
+      "background_logic": {
+        "tab_tracking": "Map to track current tab count per window",
+        "onTabCreated": "Check if new tab exceeds limit",
+        "onTabRemoved": "Update tab count",
+        "onWindowRemoved": "Clean up window data",
+        "openSelector": "Function to open selector window (stub for now)"
+      },
+      "data_structures": {
+        "tabCounts": "Map: windowId -> current tab count",
+        "pendingTabs": "Set: tabs waiting for user selection"
+      }
+    },
+    "code_structure": {
+      "storage.js": [
+        "Export functions for limit management",
+        "Use chrome.storage.sync API",
+        "Handle defaults properly",
+        "Provide clean async/await interface"
+      ],
+      "background.js": [
+        "Import storage functions",
+        "Initialize on service worker start",
+        "Set up all event listeners",
+        "Implement core limit enforcement",
+        "Add detailed console logging for debugging"
+      ]
+    },
+    "test_requirements": [
+      "Tab count updates correctly when tabs open/close",
+      "Limit check triggers at right threshold",
+      "Storage persists across extension reload",
+      "Window cleanup works properly",
+      "No memory leaks with window/tab tracking"
+    ],
+    "important_notes": [
+      "Must handle rapid tab creation (e.g., restore session)",
+      "For now, just log when limit exceeded (selector will come later)",
+      "Ensure service worker stays active during operations",
+      "Consider edge case: moving tabs between windows"
+    ]
+  }
+}
