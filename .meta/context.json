@@ -8,9 +8,19 @@
       "language": "JavaScript"
     }
   },
-  "decisions": [],
+  "decisions": [
+    {
+      "id": "001",
+      "date": "2025-08-16",
+      "decision": "Tab limits apply per window independently",
+      "rationale": "Planned tab limiter with per-window limits, separate popup for selection, no special tab handling",
+      "made_by": "team"
+    }
+  ],
   "current_context": {
     "open_questions": [],
-    "working_on": "project-setup"
+    "working_on": "manifest",
+    "last_discussion": "Starting with manifest.json as foundation",
+    "updated_at": "2025-08-16T10:51:20.498027"
   }
 }

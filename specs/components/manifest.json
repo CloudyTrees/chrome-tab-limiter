@@ -1,0 +1,52 @@
+{
+  "specification": {
+    "component": "manifest",
+    "purpose": "Chrome extension manifest configuration for tab limiter",
+    "version": "1.0",
+    "technology": {
+      "runtime": "Chrome Extension (Manifest V3)",
+      "language": "JSON"
+    },
+    "requirements": [
+      "Manifest V3 format",
+      "Permissions for tabs, storage, windows APIs",
+      "Register background service worker",
+      "Configure extension popup action",
+      "Set proper icons"
+    ]
+  },
+  "cc_instructions": {
+    "priority": 1,
+    "estimated_effort": "30 minutes",
+    "file_outputs": [
+      "chrome-tab-limiter/manifest.json"
+    ],
+    "implementation_order": [
+      "Create manifest.json with basic metadata",
+      "Add required permissions",
+      "Configure service worker",
+      "Set up action popup",
+      "Add icon references"
+    ],
+    "specific_requirements": {
+      "manifest_version": 3,
+      "name": "Tab Limiter",
+      "version": "1.0.0",
+      "description": "Limit the number of open tabs per window",
+      "permissions": ["tabs", "storage", "windows"],
+      "background": {
+        "service_worker": "background.js"
+      },
+      "action": {
+        "default_popup": "popup.html",
+        "default_title": "Tab Limiter Settings"
+      }
+    },
+    "test_requirements": [
+      "Extension loads in Chrome without errors",
+      "All permissions are properly declared",
+      "Service worker registers correctly",
+      "Popup opens when clicking extension icon"
+    ]
+  }
+}
