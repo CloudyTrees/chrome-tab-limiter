@@ -17,7 +17,12 @@ def get_component_files(component_name):
         "popup": ["popup.html", "popup.js", "popup.css"],
         "content": ["content.js"],
         "options": ["options.html", "options.js", "options.css"],
-        "full-extension": ["manifest.json", "background.js", "popup.html", "popup.js", "popup.css", "content.js"]
+        "selector": ["selector.html", "selector.js", "selector.css"],
+        "full-extension": ["manifest.json", "background.js", "popup.html", "popup.js", "popup.css", "content.js"],
+        # Enhancement components
+        "tab-groups": ["background.js"],  # Updates to background.js
+        "export-import": ["options.html", "options.js", "options.css", "utils/export-import.js"],
+        "icons": ["icons/icon16.png", "icons/icon48.png", "icons/icon128.png"]
     }
     return component_map.get(component_name, [component_name])
 
@@ -314,7 +319,12 @@ def list_components():
         "popup": "Popup UI for settings",
         "content": "Content script (if needed)",
         "options": "Options page (optional)",
-        "full-extension": "Complete extension implementation"
+        "selector": "Tab selection window",
+        "full-extension": "Complete extension implementation",
+        # Enhancement components
+        "tab-groups": "Tab group support enhancement",
+        "export-import": "Export/import settings feature",
+        "icons": "Extension icon generation"
     }
     
     print("📦 Available components:")

@@ -176,37 +176,50 @@ def show_extension_status():
         print("  Run: mkdir chrome-tab-limiter")
         return
     
-    # Expected files for Chrome extension
+    # Expected files for Chrome extension (including enhancements)
     expected_files = {
-        "manifest.json": "Extension manifest",
-        "background.js": "Background service worker",
-        "popup.html": "Popup UI HTML",
-        "popup.js": "Popup JavaScript",
-        "popup.css": "Popup styles",
-        "content.js": "Content script (optional)",
-        "options.html": "Options page (optional)",
-        "utils/storage.js": "Storage utilities"
+        "Core Files": {
+            "manifest.json": "Extension manifest",
+            "background.js": "Background service worker",
+            "popup.html": "Popup UI HTML",
+            "popup.js": "Popup JavaScript",
+            "popup.css": "Popup styles",
+            "selector.html": "Tab selector HTML",
+            "selector.js": "Tab selector JavaScript",
+            "selector.css": "Tab selector styles",
+            "utils/storage.js": "Storage utilities"
+        },
+        "Enhancement Files": {
+            "options.html": "Options page (for export/import)",
+            "options.js": "Options JavaScript",
+            "options.css": "Options styles",
+            "utils/export-import.js": "Export/import utilities",
+            "icons/icon16.png": "16x16 icon",
+            "icons/icon48.png": "48x48 icon",
+            "icons/icon128.png": "128x128 icon"
+        }
     }
     
-    if RICH_AVAILABLE:
-        table = Table(title="Extension Files", show_header=True)
-        table.add_column("File", style="cyan")
-        table.add_column("Status", style="white")
-        table.add_column("Description", style="white")
-        
-        for file, desc in expected_files.items():
-            file_path = extension_dir / file
-            status = "✔" if file_path.exists() else "✗"
-            color = "green" if file_path.exists() else "red"
-            table.add_row(file, f"[{color}]{status}[/{color}]", desc)
-        
-        console.print(table)
-    else:
-        print("\nExtension Files:")
-        for file, desc in expected_files.items():
-            file_path = extension_dir / file
-            status = "✔" if file_path.exists() else "✗"
-            print(f"  {status} {file}: {desc}")
+    for category, files in expected_files.items():
+        print(f"\n{category}:")
+        if RICH_AVAILABLE:
+            table = Table(show_header=True)
+            table.add_column("File", style="cyan")
+            table.add_column("Status", style="white")
+            table.add_column("Description", style="white")
+            
+            for file, desc in files.items():
+                file_path = extension_dir / file
+                status = "✔" if file_path.exists() else "✗"
+                color = "green" if file_path.exists() else "red"
+                table.add_row(file, f"[{color}]{status}[/{color}]", desc)
+            
+            console.print(table)
+        else:
+            for file, desc in files.items():
+                file_path = extension_dir / file
+                status = "✔" if file_path.exists() else "✗"
+                print(f"  {status} {file}: {desc}")
     
     # Check if extension can be loaded
     manifest_path = extension_dir / "manifest.json"

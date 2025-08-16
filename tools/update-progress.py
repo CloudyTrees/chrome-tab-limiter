@@ -310,12 +310,16 @@ class ProgressTracker:
         if not self.status_data["components"]:
             print_warning("No components tracked yet")
             print("\nAvailable components to track:")
+            print("  Core Components:")
             print("  - manifest: Extension manifest configuration")
             print("  - background: Background service worker")
             print("  - popup: Popup UI and logic")
-            print("  - content: Content scripts")
+            print("  - selector: Tab selection window")
             print("  - storage: Chrome storage integration")
-            print("  - ui: User interface components")
+            print("\n  Enhancement Components:")
+            print("  - tab-groups: Tab group support")
+            print("  - export-import: Export/import settings")
+            print("  - icons: Extension icons")
             return
         
         print("\n📦 Tracked Components:")
