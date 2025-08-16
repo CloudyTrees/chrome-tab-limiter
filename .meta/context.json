@@ -1,0 +1,16 @@
+{
+  "project": {
+    "name": "chrome-tab-limiter",
+    "description": "Chrome extension to limit number of open tabs",
+    "tech_stack": {
+      "platform": "Chrome Extension",
+      "manifest": "V3",
+      "language": "JavaScript"
+    }
+  },
+  "decisions": [],
+  "current_context": {
+    "open_questions": [],
+    "working_on": "project-setup"
+  }
+}
