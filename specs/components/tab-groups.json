@@ -1,0 +1,107 @@
+{
+  "specification": {
+    "component": "tab-groups",
+    "purpose": "Add support for Chrome tab groups with separate limits per group",
+    "version": "1.0",
+    "technology": {
+      "runtime": "Chrome Extension (Manifest V3)",
+      "language": "JavaScript"
+    },
+    "requirements": [
+      "Track tabs by group within each window",
+      "Allow setting limits per tab group",
+      "Ungrouped tabs have their own limit",
+      "Show group information in selector window",
+      "Update popup to show group limits"
+    ]
+  },
+  "cc_instructions": {
+    "priority": 1,
+    "estimated_effort": "2 hours",
+    "file_outputs": [
+      "chrome-tab-limiter/background.js",
+      "chrome-tab-limiter/popup.js",
+      "chrome-tab-limiter/popup.html",
+      "chrome-tab-limiter/selector.js",
+      "chrome-tab-limiter/utils/storage.js"
+    ],
+    "implementation_order": [
+      "Update storage.js to handle group limits",
+      "Modify background.js to track tab groups",
+      "Update popup to show/set group limits",
+      "Enhance selector to display group information"
+    ],
+    "specific_requirements": {
+      "storage_updates": {
+        "getGroupLimit": "Get limit for specific group in window",
+        "setGroupLimit": "Set limit for specific group",
+        "getGroupLimits": "Get all group limits for a window",
+        "storage_structure": {
+          "windowLimits": "Keep existing per-window limits",
+          "groupLimits": {
+            "windowId_groupId": "limit",
+            "windowId_ungrouped": "limit for ungrouped tabs"
+          }
+        }
+      },
+      "background_updates": {
+        "tab_tracking": "Track tabs by groupId (-1 for ungrouped)",
+        "onTabCreated": "Check group-specific limit",
+        "onTabUpdated": "Handle tab moving between groups",
+        "getTabsByGroup": "Helper to count tabs per group"
+      },
+      "popup_updates": {
+        "ui_changes": [
+          "Add 'Tab Groups' section",
+          "List active groups in current window",
+          "Input for each group's limit",
+          "Special row for ungrouped tabs limit"
+        ],
+        "functionality": [
+          "Query current window's tab groups",
+          "Save group-specific limits",
+          "Show tab count per group"
+        ]
+      },
+      "selector_updates": {
+        "display_changes": [
+          "Group tabs by their group",
+          "Show group color and title",
+          "Visual separator between groups",
+          "Sort: grouped tabs first, then ungrouped"
+        ]
+      }
+    },
+    "code_examples": {
+      "background_grouping": "// Get tabs by group\nconst getTabsByGroup = async (windowId) => {\n  const tabs = await chrome.tabs.query({windowId});\n  const groups = {};\n  \n  tabs.forEach(tab => {\n    const groupKey = tab.groupId === -1 ? 'ungrouped' : `group_${tab.groupId}`;\n    if (!groups[groupKey]) {\n      groups[groupKey] = [];\n    }\n    groups[groupKey].push(tab);\n  });\n  \n  return groups;\n};",
+      "popup_group_section": "<!-- In popup.html -->\n<div class=\"section\">\n  <h3>Tab Group Limits</h3>\n  <div id=\"groupsList\">\n    <!-- Dynamically populated -->\n  </div>\n</div>",
+      "group_display": "// Display groups in popup\nconst groups = await chrome.tabGroups.query({windowId});\nfor (const group of groups) {\n  const groupEl = document.createElement('div');\n  groupEl.innerHTML = `\n    <span style=\"color: ${group.color}\">${group.title || 'Untitled Group'}</span>\n    <input type=\"number\" id=\"group_${group.id}\" value=\"${limit}\" min=\"1\" max=\"50\">\n    <button onclick=\"saveGroupLimit(${group.id})\">Save</button>\n  `;\n}"
+    },
+    "chrome_apis": {
+      "new_apis": [
+        "chrome.tabGroups.query() - Get all groups",
+        "chrome.tabGroups.get() - Get specific group info",
+        "chrome.tabs.group() - Group tabs (optional feature)",
+        "tab.groupId property - Identify tab's group"
+      ],
+      "permissions": [
+        "tabGroups permission (add to manifest.json)"
+      ]
+    },
+    "test_requirements": [
+      "Create multiple tab groups",
+      "Set different limits per group",
+      "Test ungrouped tabs limit separately",
+      "Verify moving tabs between groups updates counts",
+      "Selector shows tabs organized by group",
+      "Limits enforced correctly per group"
+    ],
+    "important_notes": [
+      "Tab groupId is -1 when not in a group",
+      "Groups can be collapsed - still count tabs",
+      "Groups are window-specific",
+      "Handle group deletion (tabs become ungrouped)",
+      "Consider group color in UI for visual consistency"
+    ]
+  }
+}

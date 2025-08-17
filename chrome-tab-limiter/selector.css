@@ -259,6 +259,46 @@ body {
     background: #a8a8a8;
 }
 
+.group-header {
+    background: #f8f9fa;
+    border-bottom: 1px solid #e8eaed;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #5f6368;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.group-header.ungrouped {
+    background: #f1f3f4;
+}
+
+.group-header-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.group-header .group-color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.1);
+}
+
+.group-title {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.group-separator {
+    height: 1px;
+    background: #e8eaed;
+    margin: 4px 0;
+}
+
 .tab-item.keyboard-focus label {
     outline: 2px solid #4285f4;
     outline-offset: -2px;

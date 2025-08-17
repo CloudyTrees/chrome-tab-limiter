@@ -105,8 +105,8 @@ async function loadTabLimit() {
     }
 }
 
-// Display tabs in the list
-function displayTabs(tabs) {
+// Display tabs in the list, organized by groups
+async function displayTabs(tabs) {
     // Clear loading state
     tabListElement.innerHTML = '';
     
@@ -115,17 +115,158 @@ function displayTabs(tabs) {
         return;
     }
     
-    // Create tab items
-    tabs.forEach((tab, index) => {
-        const tabItem = createTabItem(tab, index);
-        tabListElement.appendChild(tabItem);
+    try {
+        // Get group information
+        const groups = await chrome.tabGroups.query({ windowId: windowId });
+        const groupMap = new Map();
+        groups.forEach(group => groupMap.set(group.id, group));
+        
+        // Organize tabs by group
+        const groupedTabs = organizeTabs(tabs, groupMap);
+        
+        // Display grouped tabs
+        let tabIndex = 0;
+        for (const [groupKey, groupData] of groupedTabs) {
+            // Add group header if it's a real group
+            if (groupKey !== 'ungrouped') {
+                const groupHeader = createGroupHeader(groupData.group);
+                tabListElement.appendChild(groupHeader);
+            } else if (groupedTabs.size > 1) {
+                // Only show ungrouped header if there are also grouped tabs
+                const ungroupedHeader = createUngroupedHeader(groupData.tabs.length);
+                tabListElement.appendChild(ungroupedHeader);
+            }
+            
+            // Add tabs in this group
+            groupData.tabs.forEach(tab => {
+                const tabItem = createTabItem(tab, tabIndex);
+                tabListElement.appendChild(tabItem);
+                tabIndex++;
+            });
+            
+            // Add separator between groups (except for last group)
+            if (groupKey !== Array.from(groupedTabs.keys()).pop() && groupedTabs.size > 1) {
+                const separator = document.createElement('div');
+                separator.className = 'group-separator';
+                tabListElement.appendChild(separator);
+            }
+        }
+        
+        // Focus first item
+        if (tabs.length > 0) {
+            currentFocusIndex = 0;
+            updateKeyboardFocus();
+        }
+        
+    } catch (error) {
+        debugLog('Error organizing tabs by groups, falling back to simple list');
+        // Fallback to simple list
+        tabs.forEach((tab, index) => {
+            const tabItem = createTabItem(tab, index);
+            tabListElement.appendChild(tabItem);
+        });
+        
+        if (tabs.length > 0) {
+            currentFocusIndex = 0;
+            updateKeyboardFocus();
+        }
+    }
+}
+
+// Organize tabs by groups
+function organizeTabs(tabs, groupMap) {
+    const organized = new Map();
+    
+    tabs.forEach(tab => {
+        let groupKey, groupData;
+        
+        if (tab.groupId === -1) {
+            groupKey = 'ungrouped';
+            if (!organized.has(groupKey)) {
+                organized.set(groupKey, { 
+                    tabs: [], 
+                    group: null 
+                });
+            }
+        } else {
+            groupKey = `group_${tab.groupId}`;
+            if (!organized.has(groupKey)) {
+                organized.set(groupKey, { 
+                    tabs: [], 
+                    group: groupMap.get(tab.groupId) || null 
+                });
+            }
+        }
+        
+        organized.get(groupKey).tabs.push(tab);
     });
     
-    // Focus first item
-    if (tabs.length > 0) {
-        currentFocusIndex = 0;
-        updateKeyboardFocus();
+    // Sort: grouped tabs first, then ungrouped
+    const sorted = new Map();
+    
+    // Add grouped tabs first
+    for (const [key, data] of organized) {
+        if (key !== 'ungrouped') {
+            sorted.set(key, data);
+        }
     }
+    
+    // Add ungrouped tabs last
+    if (organized.has('ungrouped')) {
+        sorted.set('ungrouped', organized.get('ungrouped'));
+    }
+    
+    return sorted;
+}
+
+// Create group header element
+function createGroupHeader(group) {
+    const header = document.createElement('div');
+    header.className = 'group-header';
+    
+    const color = getGroupColor(group?.color || 'grey');
+    const title = group?.title || `Group ${group?.id || ''}`;
+    
+    header.innerHTML = `
+        <div class="group-header-content">
+            <div class="group-color" style="background-color: ${color}"></div>
+            <span class="group-title">${escapeHtml(title)}</span>
+        </div>
+    `;
+    
+    return header;
+}
+
+// Create ungrouped header element
+function createUngroupedHeader(tabCount) {
+    const header = document.createElement('div');
+    header.className = 'group-header ungrouped';
+    
+    header.innerHTML = `
+        <div class="group-header-content">
+            <div class="group-color" style="background-color: #888888"></div>
+            <span class="group-title">Ungrouped Tabs (${tabCount})</span>
+        </div>
+    `;
+    
+    return header;
+}
+
+// Get Chrome tab group color
+function getGroupColor(chromeColor) {
+    const colorMap = {
+        'grey': '#5f6368',
+        'blue': '#1a73e8', 
+        'red': '#d93025',
+        'yellow': '#fbbc04',
+        'green': '#34a853',
+        'pink': '#e91e63',
+        'purple': '#9c27b0',
+        'cyan': '#00bcd4',
+        'orange': '#ff9800'
+    };
+    
+    return colorMap[chromeColor] || '#5f6368';
 }
 
 // Create a tab item element

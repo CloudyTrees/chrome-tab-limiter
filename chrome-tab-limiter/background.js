@@ -1,8 +1,9 @@
 // Background service worker for Tab Limiter extension
-import { getTabLimit, removeWindowData } from './utils/storage.js';
+import { getTabLimit, removeWindowData, getGroupLimit, removeAllGroupData } from './utils/storage.js';
 
 // Data structures to track tab counts and pending operations
 const tabCounts = new Map(); // windowId -> current tab count
+const groupCounts = new Map(); // windowId -> { groupId: count }
 const pendingTabs = new Set(); // tabs waiting for user selection
 
 // Rate limiting for security
@@ -64,6 +65,52 @@ function safeErrorLog(message, error) {
     }
 }
 
+// Helper functions for tab group tracking
+async function getTabsByGroup(windowId) {
+    try {
+        const tabs = await chrome.tabs.query({ windowId });
+        const groups = {};
+        
+        tabs.forEach(tab => {
+            const groupKey = tab.groupId === -1 ? 'ungrouped' : `group_${tab.groupId}`;
+            if (!groups[groupKey]) {
+                groups[groupKey] = [];
+            }
+            groups[groupKey].push(tab);
+        });
+        
+        return groups;
+    } catch (error) {
+        safeErrorLog('Error getting tabs by group', error);
+        return {};
+    }
+}
+
+function getGroupCount(windowId, groupId) {
+    const windowGroups = groupCounts.get(windowId) || {};
+    return windowGroups[groupId] || 0;
+}
+
+function updateGroupCount(windowId, groupId, delta) {
+    if (!groupCounts.has(windowId)) {
+        groupCounts.set(windowId, {});
+    }
+    
+    const windowGroups = groupCounts.get(windowId);
+    const currentCount = windowGroups[groupId] || 0;
+    const newCount = Math.max(0, currentCount + delta);
+    windowGroups[groupId] = newCount;
+    
+    debugLog(`Window ${windowId}, Group ${groupId}: ${currentCount} -> ${newCount} tabs`);
+    return newCount;
+}
+
+async function checkGroupLimit(windowId, groupId) {
+    const currentCount = getGroupCount(windowId, groupId);
+    const limit = await getGroupLimit(windowId, groupId);
+    return currentCount >= limit;
+}
+
 // Initialize tab counts for all windows on startup
 async function initializeTabCounts() {
     try {
@@ -72,7 +119,16 @@ async function initializeTabCounts() {
         for (const window of windows) {
             const tabs = await chrome.tabs.query({ windowId: window.id });
             tabCounts.set(window.id, tabs.length);
-            debugLog(`Window ${window.id}: ${tabs.length} tabs`);
+            
+            // Initialize group counts
+            const windowGroups = {};
+            tabs.forEach(tab => {
+                const groupId = tab.groupId === -1 ? -1 : tab.groupId;
+                windowGroups[groupId] = (windowGroups[groupId] || 0) + 1;
+            });
+            groupCounts.set(window.id, windowGroups);
+            
+            debugLog(`Window ${window.id}: ${tabs.length} tabs, Groups:`, Object.keys(windowGroups).length);
         }
         
         debugLog('Tab counts initialized:', Object.fromEntries(tabCounts));
@@ -150,11 +206,12 @@ async function handleTabCreated(tab) {
             return;
         }
         
-        debugLog(`Tab created in window ${tab.windowId}`);
+        debugLog(`Tab created in window ${tab.windowId}, group ${tab.groupId || 'ungrouped'}`);
         
-        // Check if this would exceed the limit
-        if (await wouldExceedLimit(tab.windowId)) {
-            debugLog(`Tab creation would exceed limit for window ${tab.windowId}`);
+        // Check group-specific limit first
+        const groupId = tab.groupId === -1 ? -1 : tab.groupId;
+        if (await checkGroupLimit(tab.windowId, groupId)) {
+            debugLog(`Tab creation would exceed group limit for window ${tab.windowId}, group ${groupId}`);
             
             // Add to pending tabs
             pendingTabs.add(tab.id);
@@ -162,12 +219,27 @@ async function handleTabCreated(tab) {
             // Open selector window
             await openTabSelector(tab.windowId, tab.id);
             
-            // Don't update tab count yet - wait for user selection
+            // Don't update counts yet - wait for user selection
             return;
         }
         
-        // Update tab count
+        // Also check overall window limit if still using that
+        if (await wouldExceedLimit(tab.windowId)) {
+            debugLog(`Tab creation would exceed window limit for window ${tab.windowId}`);
+            
+            // Add to pending tabs
+            pendingTabs.add(tab.id);
+            
+            // Open selector window
+            await openTabSelector(tab.windowId, tab.id);
+            
+            // Don't update counts yet - wait for user selection
+            return;
+        }
+        
+        // Update both counts
         updateTabCount(tab.windowId, 1);
+        updateGroupCount(tab.windowId, groupId, 1);
         
     } catch (error) {
         safeErrorLog('Error handling tab creation', error);
@@ -175,16 +247,32 @@ async function handleTabCreated(tab) {
 }
 
 // Handle tab removal
-function handleTabRemoved(tabId, removeInfo) {
+async function handleTabRemoved(tabId, removeInfo) {
     try {
         debugLog(`Tab removed from window ${removeInfo.windowId}`);
         
         // Remove from pending tabs if it was pending
         pendingTabs.delete(tabId);
         
-        // Update tab count (only if window still exists)
+        // Update counts (only if window still exists)
         if (!removeInfo.isWindowClosing) {
             updateTabCount(removeInfo.windowId, -1);
+            
+            // For group count, we need to find which group the tab was in
+            // This is tricky since the tab is already removed
+            // We'll update all group counts to be safe
+            try {
+                const tabs = await chrome.tabs.query({ windowId: removeInfo.windowId });
+                const windowGroups = {};
+                tabs.forEach(tab => {
+                    const groupId = tab.groupId === -1 ? -1 : tab.groupId;
+                    windowGroups[groupId] = (windowGroups[groupId] || 0) + 1;
+                });
+                groupCounts.set(removeInfo.windowId, windowGroups);
+            } catch (error) {
+                // Fallback: just decrement ungrouped count
+                updateGroupCount(removeInfo.windowId, -1, -1);
+            }
         }
         
     } catch (error) {
@@ -199,9 +287,11 @@ async function handleWindowRemoved(windowId) {
         
         // Clean up tab count tracking
         tabCounts.delete(windowId);
+        groupCounts.delete(windowId);
         
         // Clean up storage data for this window
         await removeWindowData(windowId);
+        await removeAllGroupData(windowId);
         
         debugLog('Window cleanup completed for:', windowId);
         
@@ -351,9 +441,31 @@ async function handleCancelSelection(newTabId, windowId) {
     }
 }
 
+// Handle tab updates (including group changes)
+async function handleTabUpdated(tabId, changeInfo, tab) {
+    try {
+        // Only care about group changes
+        if (changeInfo.groupId !== undefined) {
+            debugLog(`Tab ${tabId} moved to group ${changeInfo.groupId}`);
+            
+            // Recalculate group counts for this window to ensure accuracy
+            const tabs = await chrome.tabs.query({ windowId: tab.windowId });
+            const windowGroups = {};
+            tabs.forEach(t => {
+                const groupId = t.groupId === -1 ? -1 : t.groupId;
+                windowGroups[groupId] = (windowGroups[groupId] || 0) + 1;
+            });
+            groupCounts.set(tab.windowId, windowGroups);
+        }
+    } catch (error) {
+        safeErrorLog('Error handling tab update', error);
+    }
+}
+
 // Set up event listeners
 chrome.tabs.onCreated.addListener(handleTabCreated);
 chrome.tabs.onRemoved.addListener(handleTabRemoved);
+chrome.tabs.onUpdated.addListener(handleTabUpdated);
 chrome.windows.onRemoved.addListener(handleWindowRemoved);
 
 // Initialize on service worker startup
