@@ -33,6 +33,15 @@
                 </div>
             </div>
 
+            <div class="welcome-notice" id="welcomeNotice" style="display: none;">
+                <div class="notice-content">
+                    <div class="notice-icon">👋</div>
+                    <div class="notice-text">
+                        <strong>Welcome to Tab Limiter!</strong> Use the settings below to configure your tab limits, or click "Advanced Settings" for export/import options.
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-section">
                 <div class="setting-item">
                     <label for="tabLimitInput">Tab limit for this window:</label>
@@ -65,16 +74,16 @@
 
             <div class="actions-section">
                 <button id="refreshButton" class="action-btn">Refresh Data</button>
+                <button id="settingsButton" class="action-btn settings-btn">
+                    <span class="btn-icon">⚙️</span>
+                    Advanced Settings
+                </button>
             </div>
         </main>
 
         <footer class="popup-footer">
             <div class="status-message" id="statusMessage"></div>
         </footer>
-    </div>
-
-    <div class="footer">
-    <a href="#" id="optionsLink">⚙️ Settings</a>
     </div>
 
     <script src="popup.js"></script>

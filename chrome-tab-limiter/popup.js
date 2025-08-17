@@ -20,9 +20,11 @@ let defaultLimitInput;
 let saveButton;
 let saveDefaultButton;
 let refreshButton;
+let settingsButton;
 let statusMessage;
 let groupsListElement;
 let grandfatheredNotice;
+let welcomeNotice;
 
 // Current window ID
 let currentWindowId = null;
@@ -48,14 +50,17 @@ function safeErrorLog(message, error) {
     saveButton = document.getElementById('saveButton');
     saveDefaultButton = document.getElementById('saveDefaultButton');
     refreshButton = document.getElementById('refreshButton');
+    settingsButton = document.getElementById('settingsButton');
     statusMessage = document.getElementById('statusMessage');
     groupsListElement = document.getElementById('groupsList');
     grandfatheredNotice = document.getElementById('grandfatheredNotice');
+    welcomeNotice = document.getElementById('welcomeNotice');
 
     // Set up event listeners
     saveButton.addEventListener('click', handleSaveTabLimit);
     saveDefaultButton.addEventListener('click', handleSaveDefaultLimit);
     refreshButton.addEventListener('click', handleRefresh);
+    settingsButton.addEventListener('click', handleOpenSettings);
 
     // Add input validation
     tabLimitInput.addEventListener('input', validateTabLimitInput);
@@ -64,6 +69,7 @@ function safeErrorLog(message, error) {
     // Initial data load
     await loadInitialData();
     await checkGrandfatheredStatus();
+    await checkFirstRun();
 
     debugLog('Popup initialized');
 });
@@ -201,6 +207,7 @@ async function handleRefresh() {
 
         await loadInitialData();
         await checkGrandfatheredStatus();
+        await checkFirstRun();
 
     } catch (error) {
         safeErrorLog('Error refreshing data', error);
@@ -227,6 +234,37 @@ async function checkGrandfatheredStatus() {
     } catch (error) {
         safeErrorLog('Error checking grandfathered status', error);
         grandfatheredNotice.style.display = 'none';
+    }
+}
+
+// Handle opening settings page
+function handleOpenSettings() {
+    chrome.runtime.openOptionsPage();
+}
+
+// Check if this is the first run and show welcome message
+async function checkFirstRun() {
+    try {
+        const result = await chrome.storage.local.get(['hasSeenWelcome']);
+        
+        if (!result.hasSeenWelcome) {
+            // Show welcome message for first-time users
+            welcomeNotice.style.display = 'block';
+            
+            // Mark as seen after a delay
+            setTimeout(async () => {
+                await chrome.storage.local.set({ hasSeenWelcome: true });
+                
+                // Hide welcome message after 10 seconds
+                setTimeout(() => {
+                    if (welcomeNotice) {
+                        welcomeNotice.style.display = 'none';
+                    }
+                }, 10000);
+            }, 1000);
+        }
+    } catch (error) {
+        safeErrorLog('Error checking first run status', error);
     }
 }
 
@@ -524,8 +562,4 @@ document.addEventListener('keydown', (event) => {
             handleSaveDefaultLimit();
         }
     }
-});
-
-document.getElementById('optionsLink').addEventListener('click', () => {
-  chrome.runtime.openOptionsPage();
 });

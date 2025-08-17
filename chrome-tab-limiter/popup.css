@@ -44,12 +44,20 @@ body {
     border-radius: 6px;
 }
 
-.grandfathered-notice {
+.grandfathered-notice, .welcome-notice {
     margin-bottom: 24px;
     padding: 16px;
+    border-radius: 6px;
+}
+
+.grandfathered-notice {
     background: #e3f2fd;
     border: 1px solid #2196f3;
-    border-radius: 6px;
+}
+
+.welcome-notice {
+    background: #e8f5e8;
+    border: 1px solid #4caf50;
 }
 
 .notice-content {
@@ -67,7 +75,14 @@ body {
     flex: 1;
     font-size: 13px;
     line-height: 1.4;
+}
+
+.grandfathered-notice .notice-text {
     color: #1565c0;
+}
+
+.welcome-notice .notice-text {
+    color: #2e7d32;
 }
 
 .status-item {
@@ -285,6 +300,9 @@ input[type="number"]:focus {
 }
 
 .actions-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     text-align: center;
 }
 
@@ -306,6 +324,26 @@ input[type="number"]:focus {
 
 .action-btn:active {
     background: #1e5e20;
+}
+
+.settings-btn {
+    background: #1a73e8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.settings-btn:hover {
+    background: #1557b0;
+}
+
+.settings-btn:active {
+    background: #0d47a1;
+}
+
+.btn-icon {
+    font-size: 16px;
 }
 
 .popup-footer {
