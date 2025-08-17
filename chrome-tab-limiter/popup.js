@@ -32,6 +32,18 @@ let currentWindowId = null;
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('Popup initializing...');
+    
+    // Check if selector mode is active
+    try {
+        const selectorResponse = await chrome.runtime.sendMessage({ action: 'getSelectorState' });
+        if (selectorResponse?.success && selectorResponse.selectorState?.isActive) {
+            debugLog('Selector mode active, switching to selector interface');
+            await initializeSelectorMode(selectorResponse.selectorState);
+            return;
+        }
+    } catch (error) {
+        debugLog('Error checking selector state:', error);
+    }
 
 // Privacy-focused error handling - never log user data
 function safeErrorLog(message, error) {
@@ -563,3 +575,84 @@ document.addEventListener('keydown', (event) => {
         }
     }
 });
+
+// Initialize selector mode interface
+async function initializeSelectorMode(selectorState) {
+    debugLog('Initializing selector mode interface');
+    
+    // Hide normal popup content and show selector interface
+    document.body.innerHTML = `
+        <div class="selector-container">
+            <div class="selector-header">
+                <h2>⚠️ Tab Limit Reached!</h2>
+                <p>Select a tab to close:</p>
+            </div>
+            <div id="selectorTabList" class="selector-tab-list">
+                <div class="loading">Loading tabs...</div>
+            </div>
+            <div class="selector-actions">
+                <button id="selectorCancel" class="cancel-btn">Cancel</button>
+            </div>
+        </div>
+    `;
+    
+    // Load and display tabs for selection
+    await loadTabsForSelector(selectorState);
+    
+    // Set up cancel handler
+    document.getElementById('selectorCancel').addEventListener('click', async () => {
+        await chrome.runtime.sendMessage({ action: 'clearSelectorState' });
+        window.close();
+    });
+}
+
+// Load tabs for selector
+async function loadTabsForSelector(selectorState) {
+    try {
+        const tabListEl = document.getElementById('selectorTabList');
+        const tabs = await chrome.tabs.query({ windowId: selectorState.windowId });
+        
+        tabListEl.innerHTML = '';
+        
+        tabs.forEach(tab => {
+            const tabEl = document.createElement('div');
+            tabEl.className = 'selector-tab-item';
+            tabEl.innerHTML = `
+                <div class="tab-info">
+                    <img src="${tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>'}" class="tab-favicon" width="16" height="16">
+                    <span class="tab-title">${tab.title || 'Untitled'}</span>
+                </div>
+            `;
+            
+            tabEl.addEventListener('click', async () => {
+                await handleTabSelected(tab.id, selectorState);
+            });
+            
+            tabListEl.appendChild(tabEl);
+        });
+        
+    } catch (error) {
+        console.error('Error loading tabs for selector:', error);
+        document.getElementById('selectorTabList').innerHTML = '<div class="error">Error loading tabs</div>';
+    }
+}
+
+// Handle tab selection in popup selector
+async function handleTabSelected(tabId, selectorState) {
+    try {
+        if (selectorState.mode === 'replace') {
+            await chrome.runtime.sendMessage({
+                action: 'tabSelectedForReplacement',
+                tabId: tabId,
+                windowId: selectorState.windowId,
+                newTabUrl: selectorState.newTabUrl
+            });
+        }
+        
+        await chrome.runtime.sendMessage({ action: 'clearSelectorState' });
+        window.close();
+        
+    } catch (error) {
+        console.error('Error handling tab selection:', error);
+    }
+}

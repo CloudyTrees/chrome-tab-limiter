@@ -374,3 +374,73 @@ input[type="number"]:focus {
     opacity: 0.6;
     pointer-events: none;
 }
+
+/* Selector mode styles */
+.selector-container {
+    padding: 16px;
+    min-width: 300px;
+    max-width: 400px;
+}
+
+.selector-header {
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.selector-header h2 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #d93025;
+}
+
+.selector-header p {
+    margin: 0;
+    font-size: 13px;
+    color: #5f6368;
+}
+
+.selector-tab-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.selector-tab-item {
+    padding: 12px;
+    border-bottom: 1px solid #f1f3f4;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.selector-tab-item:hover {
+    background-color: #f8f9fa;
+}
+
+.selector-tab-item:last-child {
+    border-bottom: none;
+}
+
+.tab-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tab-favicon {
+    flex-shrink: 0;
+    border-radius: 2px;
+}
+
+.tab-title {
+    font-size: 13px;
+    color: #202124;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.selector-actions {
+    text-align: center;
+}
