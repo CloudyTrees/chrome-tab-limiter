@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Icon Converter</title>
+    <style>
+        body { 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .icon-box {
+            margin: 20px;
+            padding: 20px;
+            background: white;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+        .icon-box h3 {
+            margin-top: 0;
+        }
+        .instructions {
+            background: #fffbea;
+            padding: 15px;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="instructions">
+        <h2>How to save as PNG:</h2>
+        <ol>
+            <li>Right-click on each icon below</li>
+            <li>Select "Save image as..."</li>
+            <li>Save with the name shown (e.g., icon16.png)</li>
+            <li>Make sure to save all three sizes</li>
+        </ol>
+    </div>
+    
+    <div class="icon-box">
+        <h3>icon16.png (16x16)</h3>
+        <img src="icon16.svg" width="16" height="16">
+    </div>
+    
+    <div class="icon-box">
+        <h3>icon48.png (48x48)</h3>
+        <img src="icon48.svg" width="48" height="48">
+    </div>
+    
+    <div class="icon-box">
+        <h3>icon128.png (128x128)</h3>
+        <img src="icon128.svg" width="128" height="128">
+    </div>
+</body>
+</html>
