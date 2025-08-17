@@ -620,7 +620,7 @@ async function loadTabsForSelector(selectorState) {
             
             // Use chrome://favicon/ for external URLs to comply with CSP
             const faviconUrl = tab.favIconUrl ? 
-                `chrome://favicon/size/16@1x/${tab.url}` : 
+                `chrome://favicon/${encodeURIComponent(tab.url)}` : 
                 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>';
             
             tabEl.innerHTML = `
@@ -649,7 +649,7 @@ function showConfirmation(tab, selectorState) {
     
     // Use chrome://favicon/ for external URLs to comply with CSP
     const faviconUrl = tab.favIconUrl ? 
-        `chrome://favicon/size/16@1x/${tab.url}` : 
+        `chrome://favicon/${encodeURIComponent(tab.url)}` : 
         'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>';
     
     container.innerHTML = `
