@@ -5,6 +5,7 @@ import { getTabLimit, removeWindowData, getGroupLimit, removeAllGroupData } from
 const tabCounts = new Map(); // windowId -> current tab count
 const groupCounts = new Map(); // windowId -> { groupId: count }
 const pendingTabs = new Set(); // tabs waiting for user selection
+const grandfatheredCounts = new Map(); // windowId -> grandfathered tab count for existing tabs
 
 // Rate limiting for security
 const rateLimiter = {
@@ -118,7 +119,15 @@ async function initializeTabCounts() {
         
         for (const window of windows) {
             const tabs = await chrome.tabs.query({ windowId: window.id });
-            tabCounts.set(window.id, tabs.length);
+            const currentCount = tabs.length;
+            tabCounts.set(window.id, currentCount);
+            
+            // Check if current tabs exceed the limit - if so, grandfather them
+            const limit = await getTabLimit(window.id);
+            if (currentCount > limit) {
+                grandfatheredCounts.set(window.id, currentCount);
+                debugLog(`Window ${window.id}: Grandfathering ${currentCount} existing tabs (limit: ${limit})`);
+            }
             
             // Initialize group counts
             const windowGroups = {};
@@ -128,10 +137,11 @@ async function initializeTabCounts() {
             });
             groupCounts.set(window.id, windowGroups);
             
-            debugLog(`Window ${window.id}: ${tabs.length} tabs, Groups:`, Object.keys(windowGroups).length);
+            debugLog(`Window ${window.id}: ${currentCount} tabs, Groups:`, Object.keys(windowGroups).length);
         }
         
         debugLog('Tab counts initialized:', Object.fromEntries(tabCounts));
+        debugLog('Grandfathered counts:', Object.fromEntries(grandfatheredCounts));
     } catch (error) {
         safeErrorLog('Error initializing tab counts', error);
     }
@@ -142,20 +152,45 @@ function getTabCount(windowId) {
     return tabCounts.get(windowId) || 0;
 }
 
-// Update tab count for a window
-function updateTabCount(windowId, delta) {
+// Update tab count for a window and adjust grandfathered count if needed
+async function updateTabCount(windowId, delta) {
     const currentCount = getTabCount(windowId);
     const newCount = Math.max(0, currentCount + delta);
     tabCounts.set(windowId, newCount);
+    
+    // Update grandfathered count when tabs are closed
+    if (delta < 0 && grandfatheredCounts.has(windowId)) {
+        const grandfatheredCount = grandfatheredCounts.get(windowId);
+        const configuredLimit = await getTabLimit(windowId);
+        
+        // If we're now below the grandfathered count, adjust it down
+        if (newCount < grandfatheredCount) {
+            if (newCount <= configuredLimit) {
+                // We've reached the configured limit - remove grandfathering
+                grandfatheredCounts.delete(windowId);
+                debugLog(`Window ${windowId}: Grandfathering removed - now at configured limit`);
+            } else {
+                // Still above limit but below grandfathered count - adjust grandfathering down
+                grandfatheredCounts.set(windowId, newCount);
+                debugLog(`Window ${windowId}: Grandfathered count adjusted to ${newCount}`);
+            }
+        }
+    }
+    
     debugLog(`Window ${windowId}: ${currentCount} -> ${newCount} tabs`);
     return newCount;
 }
 
-// Check if adding a tab would exceed the limit
+// Check if adding a tab would exceed the limit (accounting for grandfathered tabs)
 async function wouldExceedLimit(windowId) {
     const currentCount = getTabCount(windowId);
-    const limit = await getTabLimit(windowId);
-    return currentCount >= limit;
+    const configuredLimit = await getTabLimit(windowId);
+    const grandfatheredCount = grandfatheredCounts.get(windowId);
+    
+    // Use the higher of configured limit or grandfathered count as effective limit
+    const effectiveLimit = grandfatheredCount ? Math.max(configuredLimit, grandfatheredCount) : configuredLimit;
+    
+    return currentCount >= effectiveLimit;
 }
 
 // Open tab selector window
@@ -238,7 +273,7 @@ async function handleTabCreated(tab) {
         }
         
         // Update both counts
-        updateTabCount(tab.windowId, 1);
+        await updateTabCount(tab.windowId, 1);
         updateGroupCount(tab.windowId, groupId, 1);
         
     } catch (error) {
@@ -256,7 +291,7 @@ async function handleTabRemoved(tabId, removeInfo) {
         
         // Update counts (only if window still exists)
         if (!removeInfo.isWindowClosing) {
-            updateTabCount(removeInfo.windowId, -1);
+            await updateTabCount(removeInfo.windowId, -1);
             
             // For group count, we need to find which group the tab was in
             // This is tricky since the tab is already removed
@@ -288,6 +323,7 @@ async function handleWindowRemoved(windowId) {
         // Clean up tab count tracking
         tabCounts.delete(windowId);
         groupCounts.delete(windowId);
+        grandfatheredCounts.delete(windowId);
         
         // Clean up storage data for this window
         await removeWindowData(windowId);
@@ -337,6 +373,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         console.error('Error handling cancellation:', error.name);
                         sendResponse({ success: false, error: 'Failed to cancel' });
                     });
+                break;
+            
+            case 'getGrandfatheredStatus':
+                const grandfatheredCount = grandfatheredCounts.get(request.windowId);
+                sendResponse({ 
+                    success: true, 
+                    isGrandfathered: !!grandfatheredCount,
+                    grandfatheredCount: grandfatheredCount || 0
+                });
                 break;
                 
             default:

@@ -22,6 +22,7 @@ let saveDefaultButton;
 let refreshButton;
 let statusMessage;
 let groupsListElement;
+let grandfatheredNotice;
 
 // Current window ID
 let currentWindowId = null;
@@ -49,6 +50,7 @@ function safeErrorLog(message, error) {
     refreshButton = document.getElementById('refreshButton');
     statusMessage = document.getElementById('statusMessage');
     groupsListElement = document.getElementById('groupsList');
+    grandfatheredNotice = document.getElementById('grandfatheredNotice');
 
     // Set up event listeners
     saveButton.addEventListener('click', handleSaveTabLimit);
@@ -61,6 +63,7 @@ function safeErrorLog(message, error) {
 
     // Initial data load
     await loadInitialData();
+    await checkGrandfatheredStatus();
 
     debugLog('Popup initialized');
 });
@@ -197,12 +200,33 @@ async function handleRefresh() {
         showMessage('Refreshing...', 'info');
 
         await loadInitialData();
+        await checkGrandfatheredStatus();
 
     } catch (error) {
         safeErrorLog('Error refreshing data', error);
         showMessage('Error refreshing data', 'error');
     } finally {
         refreshButton.disabled = false;
+    }
+}
+
+// Check grandfathered status and show notice if applicable
+async function checkGrandfatheredStatus() {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'getGrandfatheredStatus',
+            windowId: currentWindowId
+        });
+        
+        if (response && response.success && response.isGrandfathered) {
+            grandfatheredNotice.style.display = 'block';
+            debugLog(`Window has grandfathered tabs: ${response.grandfatheredCount}`);
+        } else {
+            grandfatheredNotice.style.display = 'none';
+        }
+    } catch (error) {
+        safeErrorLog('Error checking grandfathered status', error);
+        grandfatheredNotice.style.display = 'none';
     }
 }
 
