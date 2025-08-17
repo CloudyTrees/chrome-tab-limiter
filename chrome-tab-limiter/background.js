@@ -47,7 +47,7 @@ const rateLimiter = {
 };
 
 // Initialize service worker
-const DEBUG_MODE = false; // Set to false in production
+const DEBUG_MODE = true; // Temporarily enabled for testing
 
 function debugLog(...args) {
     if (DEBUG_MODE) {
@@ -203,16 +203,17 @@ async function openTabSelector(windowId, newTabId) {
             return;
         }
         
+        debugLog('Rate limiting passed, creating selector window...');
+        
         debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId}`);
         
-        // Create selector popup window
+        // Create selector popup window with simplified positioning
         const popup = await chrome.windows.create({
             url: `selector.html?windowId=${windowId}&newTabId=${newTabId}`,
             type: 'popup',
             width: 400,
             height: 500,
-            left: Math.round((await chrome.system.display.getInfo())[0].workArea.width / 2 - 200),
-            top: Math.round((await chrome.system.display.getInfo())[0].workArea.height / 2 - 250),
+            // Let Chrome position the window automatically instead of using display API
             focused: true
         });
         
@@ -242,6 +243,11 @@ async function handleTabCreated(tab) {
         }
         
         debugLog(`Tab created in window ${tab.windowId}, group ${tab.groupId || 'ungrouped'}`);
+        
+        // Get current counts for debugging
+        const currentTabCount = getTabCount(tab.windowId);
+        const tabLimit = await getTabLimit(tab.windowId);
+        debugLog(`Current tabs: ${currentTabCount}, Limit: ${tabLimit}`);
         
         // Check group-specific limit first
         const groupId = tab.groupId === -1 ? -1 : tab.groupId;
