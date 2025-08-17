@@ -193,6 +193,15 @@ async function wouldExceedLimit(windowId) {
     return currentCount >= effectiveLimit;
 }
 
+// Store selector state for popup access
+const selectorState = {
+    isActive: false,
+    windowId: null,
+    mode: null,
+    newTabUrl: null,
+    newTabId: null
+};
+
 // Open tab selector for replacement (when new tab was already removed)
 async function openTabSelectorForReplacement(windowId, newTabUrl) {
     try {
@@ -202,27 +211,24 @@ async function openTabSelectorForReplacement(windowId, newTabUrl) {
             return;
         }
         
-        debugLog('Rate limiting passed, creating replacement selector window...');
-        debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId} to replace: ${newTabUrl}`);
+        debugLog(`LIMIT EXCEEDED: Setting up popup selector for window ${windowId} to replace: ${newTabUrl}`);
         
-        // Create selector popup window for replacement mode
-        const selectorUrl = chrome.runtime.getURL(`selector.html?windowId=${windowId}&mode=replace&newTabUrl=${encodeURIComponent(newTabUrl)}`);
-        debugLog('Creating replacement window with URL:', selectorUrl);
+        // Store state for popup access
+        selectorState.isActive = true;
+        selectorState.windowId = windowId;
+        selectorState.mode = 'replace';
+        selectorState.newTabUrl = newTabUrl;
+        selectorState.newTabId = null;
         
-        const popup = await chrome.windows.create({
-            url: selectorUrl,
-            type: 'popup',
-            width: 400,
-            height: 500,
-            focused: true
-        });
+        // Open the extension popup
+        await chrome.action.openPopup();
         
-        debugLog(`Replacement selector window created: ${popup.id}`);
-        return popup.id;
+        debugLog(`Selector popup triggered for window ${windowId}`);
+        return true;
         
     } catch (error) {
         console.error('Error opening replacement tab selector:', error);
-        debugLog('Failed to create replacement selector window:', error.message);
+        debugLog('Failed to trigger selector popup:', error.message);
     }
 }
 
@@ -437,6 +443,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     grandfatheredCount: grandfatheredCount || 0
                 });
                 break;
+            
+            case 'getSelectorState':
+                sendResponse({
+                    success: true,
+                    selectorState: selectorState
+                });
+                break;
+                
+            case 'clearSelectorState':
+                selectorState.isActive = false;
+                selectorState.windowId = null;
+                selectorState.mode = null;
+                selectorState.newTabUrl = null;
+                selectorState.newTabId = null;
+                sendResponse({ success: true });
+                break;
                 
             default:
                 console.warn('Unknown message action received');
@@ -457,7 +479,7 @@ function validateMessageRequest(request) {
     const { action, tabId, windowId, newTabId } = request;
     
     // Check action is valid
-    const validActions = ['tabSelected', 'cancelSelection', 'tabSelectedForReplacement', 'cancelReplacement', 'getGrandfatheredStatus'];
+    const validActions = ['tabSelected', 'cancelSelection', 'tabSelectedForReplacement', 'cancelReplacement', 'getGrandfatheredStatus', 'getSelectorState', 'clearSelectorState'];
     if (!validActions.includes(action)) {
         return { valid: false, error: 'Invalid action' };
     }
