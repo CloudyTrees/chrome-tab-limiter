@@ -1,17 +1,17 @@
 // Options page script for Tab Limiter extension
 
 // Debug logging configuration
-const DEBUG_MODE = false;
+const OPTIONS_DEBUG_MODE = false;
 
 function debugLog(...args) {
-    if (DEBUG_MODE) {
+    if (OPTIONS_DEBUG_MODE) {
         console.log('[Tab Limiter Options]', ...args);
     }
 }
 
 // Privacy-focused error handling
 function safeErrorLog(message, error) {
-    if (DEBUG_MODE) {
+    if (OPTIONS_DEBUG_MODE) {
         console.error(message, error?.name || 'Unknown error');
     } else {
         console.error(message);

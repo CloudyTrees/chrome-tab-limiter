@@ -47,7 +47,7 @@ const rateLimiter = {
 };
 
 // Initialize service worker
-const DEBUG_MODE = true; // Temporarily enabled for testing
+const DEBUG_MODE = false; // Set to false in production
 
 function debugLog(...args) {
     if (DEBUG_MODE) {
@@ -208,8 +208,11 @@ async function openTabSelector(windowId, newTabId) {
         debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId}`);
         
         // Create selector popup window with simplified positioning
+        const selectorUrl = chrome.runtime.getURL(`selector.html?windowId=${windowId}&newTabId=${newTabId}`);
+        debugLog('Creating window with URL:', selectorUrl);
+        
         const popup = await chrome.windows.create({
-            url: `selector.html?windowId=${windowId}&newTabId=${newTabId}`,
+            url: selectorUrl,
             type: 'popup',
             width: 400,
             height: 500,
@@ -221,7 +224,8 @@ async function openTabSelector(windowId, newTabId) {
         return popup.id;
         
     } catch (error) {
-        safeErrorLog('Error opening tab selector', error);
+        console.error('Error opening tab selector:', error);
+        debugLog('Failed to create selector window:', error.message);
         
         // Fallback: just close the new tab
         try {

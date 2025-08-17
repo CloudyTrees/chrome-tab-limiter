@@ -1,17 +1,17 @@
 // Export/Import utility functions for Tab Limiter extension
 
 // Debug logging configuration
-const DEBUG_MODE = false;
+const EXPORT_DEBUG_MODE = false;
 
 function debugLog(...args) {
-    if (DEBUG_MODE) {
+    if (EXPORT_DEBUG_MODE) {
         console.log('[Tab Limiter Export/Import]', ...args);
     }
 }
 
 // Privacy-focused error handling
 function safeErrorLog(message, error) {
-    if (DEBUG_MODE) {
+    if (EXPORT_DEBUG_MODE) {
         console.error(message, error?.name || 'Unknown error');
     } else {
         console.error(message);
