@@ -618,10 +618,8 @@ async function loadTabsForSelector(selectorState) {
             const tabEl = document.createElement('div');
             tabEl.className = 'selector-tab-item';
             
-            // Use chrome://favicon/ for external URLs to comply with CSP
-            const faviconUrl = tab.favIconUrl ? 
-                `chrome://favicon/${encodeURIComponent(tab.url)}` : 
-                'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>';
+            // Use simple fallback icon to avoid CSP issues
+            const faviconUrl = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" fill="%23e8f0fe" stroke="%234285f4" stroke-width="1" rx="2"/><text x="8" y="11" text-anchor="middle" font-family="Arial" font-size="8" fill="%234285f4">📄</text></svg>';
             
             tabEl.innerHTML = `
                 <div class="tab-info">
@@ -647,10 +645,8 @@ async function loadTabsForSelector(selectorState) {
 function showConfirmation(tab, selectorState) {
     const container = document.querySelector('.selector-container');
     
-    // Use chrome://favicon/ for external URLs to comply with CSP
-    const faviconUrl = tab.favIconUrl ? 
-        `chrome://favicon/${encodeURIComponent(tab.url)}` : 
-        'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>';
+    // Use simple fallback icon to avoid CSP issues
+    const faviconUrl = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" fill="%23e8f0fe" stroke="%234285f4" stroke-width="1" rx="2"/><text x="8" y="11" text-anchor="middle" font-family="Arial" font-size="8" fill="%234285f4">📄</text></svg>';
     
     container.innerHTML = `
         <div class="confirmation-header">
