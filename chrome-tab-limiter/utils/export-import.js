@@ -26,10 +26,10 @@ async function exportSettings() {
         // Get all storage data
         const allData = await chrome.storage.local.get(null);
         
-        // Organize data by type
+        // Organize data by type with privacy protection
         const exportData = {
             version: '1.0.0',
-            exportDate: new Date().toISOString(),
+            exportDate: 'Privacy Protected', // Remove date/time entirely for privacy
             settings: {
                 defaultTabLimit: allData.defaultTabLimit || 10,
                 windowLimits: {},
@@ -46,19 +46,46 @@ async function exportSettings() {
         let groupCount = 0;
         let customLimitCount = 0;
         
-        // Process all storage keys
+        // Create anonymization maps for privacy protection
+        const windowIdMap = new Map();
+        const groupIdMap = new Map();
+        
+        // Process all storage keys with ID anonymization
         for (const [key, value] of Object.entries(allData)) {
             if (key.startsWith('tabLimit_')) {
-                // Window-specific tab limits
-                const windowId = key.replace('tabLimit_', '');
-                exportData.settings.windowLimits[windowId] = value;
+                // Window-specific tab limits - anonymize window ID
+                const realWindowId = key.replace('tabLimit_', '');
+                
+                // Create anonymized ID
+                if (!windowIdMap.has(realWindowId)) {
+                    windowIdMap.set(realWindowId, `window_${windowCount + 1}`);
+                }
+                const anonymizedWindowId = windowIdMap.get(realWindowId);
+                
+                exportData.settings.windowLimits[anonymizedWindowId] = value;
                 windowCount++;
                 customLimitCount++;
             } else if (key.startsWith('groupLimit_')) {
-                // Group-specific tab limits
-                exportData.settings.groupLimits[key] = value;
-                groupCount++;
-                customLimitCount++;
+                // Group-specific tab limits - anonymize group ID
+                const parts = key.split('_');
+                if (parts.length >= 3) {
+                    const realWindowId = parts[1];
+                    const realGroupId = parts.slice(2).join('_');
+                    
+                    // Create anonymized IDs
+                    if (!windowIdMap.has(realWindowId)) {
+                        windowIdMap.set(realWindowId, `window_${windowIdMap.size + 1}`);
+                    }
+                    
+                    if (!groupIdMap.has(realGroupId)) {
+                        groupIdMap.set(realGroupId, `group_${groupIdMap.size + 1}`);
+                    }
+                    
+                    const anonymizedKey = `groupLimit_${windowIdMap.get(realWindowId)}_${groupIdMap.get(realGroupId)}`;
+                    exportData.settings.groupLimits[anonymizedKey] = value;
+                    groupCount++;
+                    customLimitCount++;
+                }
             }
         }
         
@@ -67,11 +94,7 @@ async function exportSettings() {
         exportData.metadata.totalGroups = groupCount;
         exportData.metadata.totalCustomLimits = customLimitCount;
         
-        debugLog('Export completed successfully', {
-            windows: windowCount,
-            groups: groupCount,
-            customLimits: customLimitCount
-        });
+        debugLog('Export completed successfully');
         
         return exportData;
         
@@ -112,24 +135,20 @@ async function importSettings(importData, options = {}) {
             }
         }
         
-        // Window limits with additional validation
+        // Privacy Notice: Window and group-specific limits are not imported
+        // to protect user privacy. Only the default limit is restored.
+        // Users can manually reconfigure window/group-specific limits if needed.
+        
+        // Skip importing window-specific limits for privacy protection
+        let skippedWindowLimits = 0;
+        let skippedGroupLimits = 0;
+        
         if (importData.settings.windowLimits) {
-            for (const [windowId, limit] of Object.entries(importData.settings.windowLimits)) {
-                // Validate windowId format and limit value
-                if (validateWindowId(windowId) && validateLimit(limit)) {
-                    storageData[`tabLimit_${windowId}`] = limit;
-                }
-            }
+            skippedWindowLimits = Object.keys(importData.settings.windowLimits).length;
         }
         
-        // Group limits with additional validation
         if (importData.settings.groupLimits) {
-            for (const [groupKey, limit] of Object.entries(importData.settings.groupLimits)) {
-                // Validate group key format and limit value
-                if (validateGroupKey(groupKey) && validateLimit(limit)) {
-                    storageData[groupKey] = limit;
-                }
-            }
+            skippedGroupLimits = Object.keys(importData.settings.groupLimits).length;
         }
         
         // Clear existing data if replacing
@@ -146,8 +165,13 @@ async function importSettings(importData, options = {}) {
             success: true,
             imported: {
                 defaultLimit: !!importData.settings.defaultTabLimit,
-                windowLimits: Object.keys(importData.settings.windowLimits || {}).length,
-                groupLimits: Object.keys(importData.settings.groupLimits || {}).length
+                windowLimits: 0, // Privacy protected - not imported
+                groupLimits: 0   // Privacy protected - not imported
+            },
+            privacyNotice: {
+                skippedWindowLimits,
+                skippedGroupLimits,
+                message: 'Window and group-specific limits were not imported to protect your privacy. Only the default limit was restored.'
             }
         };
         

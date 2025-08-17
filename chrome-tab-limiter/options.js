@@ -323,7 +323,14 @@ async function handleConfirmImport() {
         const result = await TabLimiterExportImport.importSettings(pendingImportData);
         
         if (result.success) {
-            showStatusMessage(importStatus, 'Settings imported successfully!', 'success');
+            let message = 'Settings imported successfully!';
+            
+            // Add privacy notice if applicable
+            if (result.privacyNotice && (result.privacyNotice.skippedWindowLimits > 0 || result.privacyNotice.skippedGroupLimits > 0)) {
+                message += ` Note: ${result.privacyNotice.skippedWindowLimits + result.privacyNotice.skippedGroupLimits} window/group-specific limits were skipped for privacy protection.`;
+            }
+            
+            showStatusMessage(importStatus, message, 'success');
             
             // Refresh current settings display
             await loadCurrentSettings();
@@ -331,7 +338,7 @@ async function handleConfirmImport() {
             // Hide confirmation and preview
             handleCancelImport();
             
-            debugLog('Import completed successfully', result.imported);
+            debugLog('Import completed successfully');
         } else {
             throw new Error('Import process failed');
         }

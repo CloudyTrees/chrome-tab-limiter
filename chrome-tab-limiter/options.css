@@ -423,6 +423,33 @@ body {
     outline-offset: 2px;
 }
 
+/* Privacy Information Styles */
+.privacy-info {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.privacy-item {
+    background: #e8f5e8;
+    border: 1px solid #4caf50;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.privacy-item h4 {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1b5e20;
+    margin-bottom: 8px;
+}
+
+.privacy-item p {
+    color: #2e7d32;
+    line-height: 1.5;
+    margin: 0;
+}
+
 /* High contrast mode support */
 @media (prefers-contrast: high) {
     .subsection {
@@ -434,6 +461,10 @@ body {
     }
     
     .settings-preview, .import-preview {
+        border: 2px solid #000;
+    }
+    
+    .privacy-item {
         border: 2px solid #000;
     }
 }
