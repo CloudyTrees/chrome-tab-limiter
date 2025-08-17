@@ -112,19 +112,21 @@ async function importSettings(importData, options = {}) {
             }
         }
         
-        // Window limits
+        // Window limits with additional validation
         if (importData.settings.windowLimits) {
             for (const [windowId, limit] of Object.entries(importData.settings.windowLimits)) {
-                if (validateLimit(limit)) {
+                // Validate windowId format and limit value
+                if (validateWindowId(windowId) && validateLimit(limit)) {
                     storageData[`tabLimit_${windowId}`] = limit;
                 }
             }
         }
         
-        // Group limits
+        // Group limits with additional validation
         if (importData.settings.groupLimits) {
             for (const [groupKey, limit] of Object.entries(importData.settings.groupLimits)) {
-                if (groupKey.startsWith('groupLimit_') && validateLimit(limit)) {
+                // Validate group key format and limit value
+                if (validateGroupKey(groupKey) && validateLimit(limit)) {
                     storageData[groupKey] = limit;
                 }
             }
@@ -191,8 +193,8 @@ function validateImportData(data) {
             }
             
             for (const [windowId, limit] of Object.entries(data.settings.windowLimits)) {
-                if (!validateLimit(limit)) {
-                    return { valid: false, error: `Invalid limit for window ${windowId}` };
+                if (!validateWindowId(windowId) || !validateLimit(limit)) {
+                    return { valid: false, error: `Invalid window limit configuration` };
                 }
             }
         }
@@ -204,12 +206,8 @@ function validateImportData(data) {
             }
             
             for (const [groupKey, limit] of Object.entries(data.settings.groupLimits)) {
-                if (!groupKey.startsWith('groupLimit_')) {
-                    return { valid: false, error: `Invalid group limit key: ${groupKey}` };
-                }
-                
-                if (!validateLimit(limit)) {
-                    return { valid: false, error: `Invalid limit for group ${groupKey}` };
+                if (!validateGroupKey(groupKey) || !validateLimit(limit)) {
+                    return { valid: false, error: `Invalid group limit configuration` };
                 }
             }
         }
@@ -224,6 +222,37 @@ function validateImportData(data) {
 // Validate a tab limit value
 function validateLimit(limit) {
     return Number.isSafeInteger(limit) && limit >= 1 && limit <= 100;
+}
+
+// Validate window ID format to prevent injection
+function validateWindowId(windowId) {
+    // Window IDs should be numeric strings or safe identifiers
+    if (typeof windowId !== 'string') return false;
+    
+    // Prevent prototype pollution
+    if (windowId === '__proto__' || windowId === 'constructor' || windowId === 'prototype') {
+        return false;
+    }
+    
+    // Allow only alphanumeric characters, dashes, and underscores
+    const validPattern = /^[a-zA-Z0-9_-]+$/;
+    return validPattern.test(windowId) && windowId.length <= 50;
+}
+
+// Validate group key format to prevent injection
+function validateGroupKey(groupKey) {
+    if (typeof groupKey !== 'string') return false;
+    
+    // Prevent prototype pollution
+    if (groupKey === '__proto__' || groupKey === 'constructor' || groupKey === 'prototype') {
+        return false;
+    }
+    
+    // Must start with 'groupLimit_' and contain valid characters
+    if (!groupKey.startsWith('groupLimit_')) return false;
+    
+    const validPattern = /^groupLimit_[a-zA-Z0-9_-]+$/;
+    return validPattern.test(groupKey) && groupKey.length <= 100;
 }
 
 // Get current settings summary for display
@@ -309,8 +338,8 @@ function downloadAsJSON(data, filename) {
         a.click();
         document.body.removeChild(a);
         
-        // Clean up
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        // Clean up immediately after click
+        URL.revokeObjectURL(url);
         
         return true;
         
@@ -342,8 +371,23 @@ function readJSONFile(file) {
         
         reader.onload = (event) => {
             try {
-                const jsonData = JSON.parse(event.target.result);
-                resolve(jsonData);
+                const textContent = event.target.result;
+                
+                // Additional security: limit text content size
+                if (textContent.length > 2 * 1024 * 1024) { // 2MB text limit
+                    reject(new Error('File content too large'));
+                    return;
+                }
+                
+                // Parse JSON with potential prototype pollution protection
+                const jsonData = JSON.parse(textContent);
+                
+                // Basic object structure validation
+                if (jsonData && typeof jsonData === 'object' && !Array.isArray(jsonData)) {
+                    resolve(jsonData);
+                } else {
+                    reject(new Error('Invalid file format - must be a JSON object'));
+                }
             } catch (error) {
                 reject(new Error('Invalid JSON file'));
             }

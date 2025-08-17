@@ -108,26 +108,31 @@ async function loadCurrentSettings() {
         
         const summary = await TabLimiterExportImport.getCurrentSettingsSummary();
         
-        const html = `
-            <div class="setting-item">
-                <label>Default Tab Limit:</label>
-                <span class="value">${summary.defaultLimit}</span>
-            </div>
-            <div class="setting-item">
-                <label>Window-specific Limits:</label>
-                <span class="value">${summary.windowLimits}</span>
-            </div>
-            <div class="setting-item">
-                <label>Group-specific Limits:</label>
-                <span class="value">${summary.groupLimits}</span>
-            </div>
-            <div class="setting-item">
-                <label>Total Custom Settings:</label>
-                <span class="value highlight">${summary.totalCustomSettings}</span>
-            </div>
-        `;
+        // Create elements safely to prevent XSS
+        settingsPreview.innerHTML = '';
         
-        settingsPreview.innerHTML = html;
+        const items = [
+            { label: 'Default Tab Limit', value: summary.defaultLimit },
+            { label: 'Window-specific Limits', value: summary.windowLimits },
+            { label: 'Group-specific Limits', value: summary.groupLimits },
+            { label: 'Total Custom Settings', value: summary.totalCustomSettings, highlight: true }
+        ];
+        
+        items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'setting-item';
+            
+            const label = document.createElement('label');
+            label.textContent = item.label + ':';
+            
+            const span = document.createElement('span');
+            span.className = item.highlight ? 'value highlight' : 'value';
+            span.textContent = item.value;
+            
+            div.appendChild(label);
+            div.appendChild(span);
+            settingsPreview.appendChild(div);
+        });
         
     } catch (error) {
         safeErrorLog('Error loading current settings', error);
@@ -220,43 +225,72 @@ function displayImportPreview(importData) {
         const settings = importData.settings || {};
         const metadata = importData.metadata || {};
         
-        const html = `
-            <div class="preview-header">
-                <h4>Import Preview</h4>
-                <div class="import-meta">
-                    <span>Version: ${TabLimiterExportImport.escapeHtml(importData.version || 'Unknown')}</span>
-                    ${importData.exportDate ? `<span>Exported: ${new Date(importData.exportDate).toLocaleDateString()}</span>` : ''}
-                </div>
-            </div>
-            <div class="preview-content">
-                <div class="setting-item">
-                    <label>Default Tab Limit:</label>
-                    <span class="value">${settings.defaultTabLimit || 'Not set'}</span>
-                </div>
-                <div class="setting-item">
-                    <label>Window Limits:</label>
-                    <span class="value">${Object.keys(settings.windowLimits || {}).length}</span>
-                </div>
-                <div class="setting-item">
-                    <label>Group Limits:</label>
-                    <span class="value">${Object.keys(settings.groupLimits || {}).length}</span>
-                </div>
-                <div class="setting-item">
-                    <label>Total Settings:</label>
-                    <span class="value highlight">${metadata.totalCustomLimits || 'Unknown'}</span>
-                </div>
-            </div>
-            <div class="import-warning">
-                ⚠️ This will replace all your current settings. Make sure to export your current settings first if you want to keep them.
-            </div>
-        `;
+        // Create preview elements safely to prevent XSS
+        importPreview.innerHTML = '';
         
-        importPreview.innerHTML = html;
+        // Create header
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'preview-header';
+        
+        const h4 = document.createElement('h4');
+        h4.textContent = 'Import Preview';
+        headerDiv.appendChild(h4);
+        
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'import-meta';
+        
+        const versionSpan = document.createElement('span');
+        versionSpan.textContent = `Version: ${importData.version || 'Unknown'}`;
+        metaDiv.appendChild(versionSpan);
+        
+        if (importData.exportDate) {
+            const dateSpan = document.createElement('span');
+            dateSpan.textContent = `Exported: ${new Date(importData.exportDate).toLocaleDateString()}`;
+            metaDiv.appendChild(dateSpan);
+        }
+        
+        headerDiv.appendChild(metaDiv);
+        importPreview.appendChild(headerDiv);
+        
+        // Create content
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'preview-content';
+        
+        const items = [
+            { label: 'Default Tab Limit', value: settings.defaultTabLimit || 'Not set' },
+            { label: 'Window Limits', value: Object.keys(settings.windowLimits || {}).length },
+            { label: 'Group Limits', value: Object.keys(settings.groupLimits || {}).length },
+            { label: 'Total Settings', value: metadata.totalCustomLimits || 'Unknown', highlight: true }
+        ];
+        
+        items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'setting-item';
+            
+            const label = document.createElement('label');
+            label.textContent = item.label + ':';
+            
+            const span = document.createElement('span');
+            span.className = item.highlight ? 'value highlight' : 'value';
+            span.textContent = item.value;
+            
+            div.appendChild(label);
+            div.appendChild(span);
+            contentDiv.appendChild(div);
+        });
+        
+        importPreview.appendChild(contentDiv);
+        
+        // Create warning
+        const warningDiv = document.createElement('div');
+        warningDiv.className = 'import-warning';
+        warningDiv.textContent = '⚠️ This will replace all your current settings. Make sure to export your current settings first if you want to keep them.';
+        importPreview.appendChild(warningDiv);
         importPreviewSection.style.display = 'block';
         
     } catch (error) {
         safeErrorLog('Error displaying import preview', error);
-        importPreview.innerHTML = '<div class="error">Error displaying preview</div>';
+        // Create error message safely\n        importPreview.innerHTML = '';\n        const errorDiv = document.createElement('div');\n        errorDiv.className = 'error';\n        errorDiv.textContent = 'Error displaying preview';\n        importPreview.appendChild(errorDiv);
     }
 }
 
