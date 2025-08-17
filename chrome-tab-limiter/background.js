@@ -193,7 +193,40 @@ async function wouldExceedLimit(windowId) {
     return currentCount >= effectiveLimit;
 }
 
-// Open tab selector window
+// Open tab selector for replacement (when new tab was already removed)
+async function openTabSelectorForReplacement(windowId, newTabUrl) {
+    try {
+        // Rate limiting check
+        if (!rateLimiter.isAllowed('selectorOpen')) {
+            console.warn('Selector opening rate limited');
+            return;
+        }
+        
+        debugLog('Rate limiting passed, creating replacement selector window...');
+        debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId} to replace: ${newTabUrl}`);
+        
+        // Create selector popup window for replacement mode
+        const selectorUrl = chrome.runtime.getURL(`selector.html?windowId=${windowId}&mode=replace&newTabUrl=${encodeURIComponent(newTabUrl)}`);
+        debugLog('Creating replacement window with URL:', selectorUrl);
+        
+        const popup = await chrome.windows.create({
+            url: selectorUrl,
+            type: 'popup',
+            width: 400,
+            height: 500,
+            focused: true
+        });
+        
+        debugLog(`Replacement selector window created: ${popup.id}`);
+        return popup.id;
+        
+    } catch (error) {
+        console.error('Error opening replacement tab selector:', error);
+        debugLog('Failed to create replacement selector window:', error.message);
+    }
+}
+
+// Open tab selector window (legacy mode - for existing tabs)
 async function openTabSelector(windowId, newTabId) {
     try {
         // Rate limiting check
@@ -253,38 +286,31 @@ async function handleTabCreated(tab) {
         const tabLimit = await getTabLimit(tab.windowId);
         debugLog(`Current tabs: ${currentTabCount}, Limit: ${tabLimit}`);
         
-        // Check group-specific limit first
-        const groupId = tab.groupId === -1 ? -1 : tab.groupId;
-        if (await checkGroupLimit(tab.windowId, groupId)) {
-            debugLog(`Tab creation would exceed group limit for window ${tab.windowId}, group ${groupId}`);
-            
-            // Add to pending tabs
-            pendingTabs.add(tab.id);
-            
-            // Open selector window
-            await openTabSelector(tab.windowId, tab.id);
-            
-            // Don't update counts yet - wait for user selection
-            return;
-        }
+        // Check if limit would be exceeded (before counting the new tab)
+        const wouldExceedGroupLimit = await checkGroupLimit(tab.windowId, tab.groupId === -1 ? -1 : tab.groupId);
+        const wouldExceedWindowLimit = await wouldExceedLimit(tab.windowId);
         
-        // Also check overall window limit if still using that
-        if (await wouldExceedLimit(tab.windowId)) {
-            debugLog(`Tab creation would exceed window limit for window ${tab.windowId}`);
+        if (wouldExceedGroupLimit || wouldExceedWindowLimit) {
+            const limitType = wouldExceedGroupLimit ? 'group' : 'window';
+            debugLog(`Tab creation would exceed ${limitType} limit for window ${tab.windowId}`);
             
-            // Add to pending tabs
-            pendingTabs.add(tab.id);
+            // IMMEDIATELY remove the new tab to enforce limit
+            await chrome.tabs.remove(tab.id);
+            debugLog(`Removed new tab ${tab.id} due to limit violation`);
             
-            // Open selector window
-            await openTabSelector(tab.windowId, tab.id);
+            // Store the URL that was being opened so we can recreate it later
+            const newTabUrl = tab.url || tab.pendingUrl || 'chrome://newtab/';
             
-            // Don't update counts yet - wait for user selection
+            // Open selector to choose which existing tab to close
+            await openTabSelectorForReplacement(tab.windowId, newTabUrl);
+            
+            // Don't update counts - the tab was removed
             return;
         }
         
         // Update both counts
         await updateTabCount(tab.windowId, 1);
-        updateGroupCount(tab.windowId, groupId, 1);
+        updateGroupCount(tab.windowId, tab.groupId === -1 ? -1 : tab.groupId, 1);
         
     } catch (error) {
         safeErrorLog('Error handling tab creation', error);
@@ -385,6 +411,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     });
                 break;
             
+            case 'tabSelectedForReplacement':
+                handleTabSelectedForReplacement(request.tabId, request.windowId, request.newTabUrl)
+                    .then(() => sendResponse({ success: true }))
+                    .catch((error) => {
+                        console.error('Error handling replacement tab selection:', error.name);
+                        sendResponse({ success: false, error: 'Failed to replace tab' });
+                    });
+                break;
+                
+            case 'cancelReplacement':
+                handleCancelReplacement(request.windowId)
+                    .then(() => sendResponse({ success: true }))
+                    .catch((error) => {
+                        console.error('Error handling replacement cancellation:', error.name);
+                        sendResponse({ success: false, error: 'Failed to cancel replacement' });
+                    });
+                break;
+            
             case 'getGrandfatheredStatus':
                 const grandfatheredCount = grandfatheredCounts.get(request.windowId);
                 sendResponse({ 
@@ -413,7 +457,7 @@ function validateMessageRequest(request) {
     const { action, tabId, windowId, newTabId } = request;
     
     // Check action is valid
-    const validActions = ['tabSelected', 'cancelSelection'];
+    const validActions = ['tabSelected', 'cancelSelection', 'tabSelectedForReplacement', 'cancelReplacement', 'getGrandfatheredStatus'];
     if (!validActions.includes(action)) {
         return { valid: false, error: 'Invalid action' };
     }
@@ -441,6 +485,18 @@ function validateMessageRequest(request) {
     if (action === 'cancelSelection') {
         if (!newTabId || !windowId) {
             return { valid: false, error: 'Missing required fields for cancelSelection' };
+        }
+    }
+    
+    if (action === 'tabSelectedForReplacement') {
+        if (!tabId || !windowId || !request.newTabUrl) {
+            return { valid: false, error: 'Missing required fields for tabSelectedForReplacement' };
+        }
+    }
+    
+    if (action === 'cancelReplacement') {
+        if (!windowId) {
+            return { valid: false, error: 'Missing required fields for cancelReplacement' };
         }
     }
     
@@ -493,6 +549,46 @@ async function handleCancelSelection(newTabId, windowId) {
         
     } catch (error) {
         safeErrorLog('Error handling cancel selection', error);
+    }
+}
+
+// Handle tab selection for replacement from selector window
+async function handleTabSelectedForReplacement(selectedTabId, windowId, newTabUrl) {
+    try {
+        debugLog('User selected tab to close for replacement');
+        
+        // Remove the selected tab
+        await chrome.tabs.remove(selectedTabId);
+        debugLog('Closed selected tab for replacement');
+        
+        // Create the new tab with the requested URL
+        const newTab = await chrome.tabs.create({
+            windowId: windowId,
+            url: newTabUrl,
+            active: true
+        });
+        debugLog(`Created replacement tab ${newTab.id} with URL: ${newTabUrl}`);
+        
+        // Tab counts remain the same (one removed, one added)
+        debugLog(`Tab counts remain unchanged for window ${windowId}`);
+        
+    } catch (error) {
+        safeErrorLog('Error handling replacement tab selection', error);
+        throw error; // Re-throw to show error in selector
+    }
+}
+
+// Handle cancel replacement from selector window
+async function handleCancelReplacement(windowId) {
+    try {
+        debugLog('User canceled replacement - no action needed');
+        
+        // In replacement mode, the new tab was already removed
+        // Nothing else to do
+        debugLog(`No tab changes for window ${windowId} - replacement canceled`);
+        
+    } catch (error) {
+        safeErrorLog('Error handling cancel replacement', error);
     }
 }
 

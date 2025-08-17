@@ -290,7 +290,12 @@ function displayImportPreview(importData) {
         
     } catch (error) {
         safeErrorLog('Error displaying import preview', error);
-        // Create error message safely\n        importPreview.innerHTML = '';\n        const errorDiv = document.createElement('div');\n        errorDiv.className = 'error';\n        errorDiv.textContent = 'Error displaying preview';\n        importPreview.appendChild(errorDiv);
+        // Create error message safely
+        importPreview.innerHTML = '';
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error';
+        errorDiv.textContent = 'Error displaying preview';
+        importPreview.appendChild(errorDiv);
     }
 }
 

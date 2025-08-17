@@ -12,6 +12,8 @@ function debugLog(...args) {
 // Global variables
 let windowId = null;
 let newTabId = null;
+let newTabUrl = null;
+let mode = 'legacy'; // 'legacy' or 'replace'
 let allTabs = [];
 let selectedTabId = null;
 let currentFocusIndex = -1;
@@ -51,10 +53,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Get parameters from URL
     const params = new URLSearchParams(window.location.search);
     windowId = parseInt(params.get('windowId'));
-    newTabId = parseInt(params.get('newTabId'));
+    mode = params.get('mode') || 'legacy';
     
-    if (!windowId || !newTabId) {
-        safeErrorLog('Missing required parameters');
+    if (mode === 'replace') {
+        newTabUrl = decodeURIComponent(params.get('newTabUrl') || 'chrome://newtab/');
+        debugLog(`Replacement mode: ${newTabUrl}`);
+    } else {
+        newTabId = parseInt(params.get('newTabId'));
+        if (!windowId || !newTabId) {
+            safeErrorLog('Missing required parameters for legacy mode');
+            showError('Invalid parameters provided');
+            return;
+        }
+    }
+    
+    if (!windowId) {
+        safeErrorLog('Missing windowId parameter');
         showError('Invalid parameters provided');
         return;
     }
@@ -70,23 +84,34 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Load tabs for the current window and display them
 async function loadAndDisplayTabs() {
     try {
+        debugLog(`Loading tabs for window ${windowId} in mode ${mode}`);
+        
         // Get all tabs in the window
         const tabs = await chrome.tabs.query({ windowId: windowId });
+        debugLog(`Chrome API returned ${tabs.length} tabs`);
         
-        // Filter out the new tab
-        allTabs = tabs.filter(tab => tab.id !== newTabId);
-        
-        debugLog(`Found ${allTabs.length} tabs to display (excluding new tab)`);
+        if (mode === 'replace') {
+            // In replacement mode, show all tabs (new tab was already removed)
+            allTabs = tabs;
+            debugLog(`Found ${allTabs.length} tabs to display (replacement mode)`);
+        } else {
+            // In legacy mode, filter out the new tab
+            allTabs = tabs.filter(tab => tab.id !== newTabId);
+            debugLog(`Found ${allTabs.length} tabs to display (excluding new tab)`);
+        }
         
         // Get the tab limit for this window
         await loadTabLimit();
         
         // Display the tabs
+        debugLog('About to call displayTabs');
         displayTabs(allTabs);
+        debugLog('displayTabs call completed');
         
     } catch (error) {
         safeErrorLog('Error loading tabs', error);
-        showError('Failed to load tabs');
+        console.error('Full error details:', error);
+        showError('Failed to load tabs: ' + error.message);
     }
 }
 
@@ -107,17 +132,23 @@ async function loadTabLimit() {
 
 // Display tabs in the list, organized by groups
 async function displayTabs(tabs) {
+    debugLog(`displayTabs called with ${tabs.length} tabs`);
+    
     // Clear loading state
     tabListElement.innerHTML = '';
+    debugLog('Cleared loading state');
     
     if (tabs.length === 0) {
+        debugLog('No tabs to display');
         showError('No tabs found to display');
         return;
     }
     
     try {
+        debugLog('Getting group information');
         // Get group information
         const groups = await chrome.tabGroups.query({ windowId: windowId });
+        debugLog(`Found ${groups.length} groups`);
         const groupMap = new Map();
         groups.forEach(group => groupMap.set(group.id, group));
         
@@ -227,7 +258,20 @@ function createGroupHeader(group) {
     const color = getGroupColor(group?.color || 'grey');
     const title = group?.title || `Group ${group?.id || ''}`;
     
-    const headerContent = document.createElement('div');\n    headerContent.className = 'group-header-content';\n    \n    const colorDiv = document.createElement('div');\n    colorDiv.className = 'group-color';\n    colorDiv.style.backgroundColor = color;\n    \n    const titleSpan = document.createElement('span');\n    titleSpan.className = 'group-title';\n    titleSpan.textContent = title;\n    \n    headerContent.appendChild(colorDiv);\n    headerContent.appendChild(titleSpan);\n    header.appendChild(headerContent);
+    const headerContent = document.createElement('div');
+    headerContent.className = 'group-header-content';
+    
+    const colorDiv = document.createElement('div');
+    colorDiv.className = 'group-color';
+    colorDiv.style.backgroundColor = color;
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'group-title';
+    titleSpan.textContent = title;
+    
+    headerContent.appendChild(colorDiv);
+    headerContent.appendChild(titleSpan);
+    header.appendChild(headerContent);
     
     return header;
 }
@@ -237,7 +281,20 @@ function createUngroupedHeader(tabCount) {
     const header = document.createElement('div');
     header.className = 'group-header ungrouped';
     
-    const headerContent = document.createElement('div');\n    headerContent.className = 'group-header-content';\n    \n    const colorDiv = document.createElement('div');\n    colorDiv.className = 'group-color';\n    colorDiv.style.backgroundColor = '#888888';\n    \n    const titleSpan = document.createElement('span');\n    titleSpan.className = 'group-title';\n    titleSpan.textContent = `Ungrouped Tabs (${tabCount})`;\n    \n    headerContent.appendChild(colorDiv);\n    headerContent.appendChild(titleSpan);\n    header.appendChild(headerContent);
+    const headerContent = document.createElement('div');
+    headerContent.className = 'group-header-content';
+    
+    const colorDiv = document.createElement('div');
+    colorDiv.className = 'group-color';
+    colorDiv.style.backgroundColor = '#888888';
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'group-title';
+    titleSpan.textContent = `Ungrouped Tabs (${tabCount})`;
+    
+    headerContent.appendChild(colorDiv);
+    headerContent.appendChild(titleSpan);
+    header.appendChild(headerContent);
     
     return header;
 }
@@ -295,7 +352,25 @@ function createTabItem(tab, index) {
 // Create favicon element with fallback
 function createFaviconElement(tab) {
     if (tab.favIconUrl && isValidFaviconUrl(tab.favIconUrl)) {
-        const img = document.createElement('img');\n        img.src = tab.favIconUrl;\n        img.className = 'favicon';\n        img.alt = 'favicon';\n        \n        const fallback = document.createElement('div');\n        fallback.className = 'favicon default';\n        fallback.textContent = '🌐';\n        fallback.style.display = 'none';\n        \n        img.addEventListener('error', () => {\n            img.style.display = 'none';\n            fallback.style.display = 'block';\n        });\n        \n        const container = document.createElement('div');\n        container.appendChild(img);\n        container.appendChild(fallback);\n        return container.innerHTML;
+        const img = document.createElement('img');
+        img.src = tab.favIconUrl;
+        img.className = 'favicon';
+        img.alt = 'favicon';
+        
+        const fallback = document.createElement('div');
+        fallback.className = 'favicon default';
+        fallback.textContent = '🌐';
+        fallback.style.display = 'none';
+        
+        img.addEventListener('error', () => {
+            img.style.display = 'none';
+            fallback.style.display = 'block';
+        });
+        
+        const container = document.createElement('div');
+        container.appendChild(img);
+        container.appendChild(fallback);
+        return container.innerHTML;
     } else {
         // Use default icon
         return '<div class="favicon default">🌐</div>';
@@ -405,12 +480,19 @@ async function handleConfirm() {
         debugLog('Sending message to close selected tab');
         
         // Send message to background script with error handling
-        const response = await chrome.runtime.sendMessage({
-            action: 'tabSelected',
+        const message = {
+            action: mode === 'replace' ? 'tabSelectedForReplacement' : 'tabSelected',
             tabId: selectedTabId,
-            windowId: windowId,
-            newTabId: newTabId
-        });
+            windowId: windowId
+        };
+        
+        if (mode === 'replace') {
+            message.newTabUrl = newTabUrl;
+        } else {
+            message.newTabId = newTabId;
+        }
+        
+        const response = await chrome.runtime.sendMessage(message);
         
         if (!response || !response.success) {
             throw new Error(response?.error || 'Failed to close tab');
@@ -436,11 +518,16 @@ async function handleCancel() {
         debugLog('Sending message to cancel and close new tab');
         
         // Send message to background script with error handling
-        const response = await chrome.runtime.sendMessage({
-            action: 'cancelSelection',
-            newTabId: newTabId,
+        const message = {
+            action: mode === 'replace' ? 'cancelReplacement' : 'cancelSelection',
             windowId: windowId
-        });
+        };
+        
+        if (mode === 'legacy') {
+            message.newTabId = newTabId;
+        }
+        
+        const response = await chrome.runtime.sendMessage(message);
         
         if (!response || !response.success) {
             throw new Error(response?.error || 'Failed to cancel');
@@ -524,7 +611,28 @@ function updateKeyboardFocus() {
 
 // Show error message
 function showError(message) {
-    tabListElement.innerHTML = '';\n    \n    const errorDiv = document.createElement('div');\n    errorDiv.className = 'error-message';\n    errorDiv.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #d93025; text-align: center; padding: 20px;';\n    \n    const iconDiv = document.createElement('div');\n    iconDiv.style.cssText = 'font-size: 24px; margin-bottom: 12px;';\n    iconDiv.textContent = '❌';\n    \n    const titleDiv = document.createElement('div');\n    titleDiv.style.cssText = 'font-weight: 500; margin-bottom: 8px;';\n    titleDiv.textContent = 'Error';\n    \n    const messageDiv = document.createElement('div');\n    messageDiv.style.cssText = 'font-size: 12px; color: #5f6368;';\n    messageDiv.textContent = message;\n    \n    errorDiv.appendChild(iconDiv);\n    errorDiv.appendChild(titleDiv);\n    errorDiv.appendChild(messageDiv);\n    tabListElement.appendChild(errorDiv);
+    tabListElement.innerHTML = '';
+    
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #d93025; text-align: center; padding: 20px;';
+    
+    const iconDiv = document.createElement('div');
+    iconDiv.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
+    iconDiv.textContent = '❌';
+    
+    const titleDiv = document.createElement('div');
+    titleDiv.style.cssText = 'font-weight: 500; margin-bottom: 8px;';
+    titleDiv.textContent = 'Error';
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = 'font-size: 12px; color: #5f6368;';
+    messageDiv.textContent = message;
+    
+    errorDiv.appendChild(iconDiv);
+    errorDiv.appendChild(titleDiv);
+    errorDiv.appendChild(messageDiv);
+    tabListElement.appendChild(errorDiv);
 }
 
 // Enhanced HTML escaping and input sanitization to prevent XSS
