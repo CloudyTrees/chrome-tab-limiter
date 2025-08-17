@@ -11,7 +11,7 @@
         <header class="popup-header">
             <h1>Tab Limiter</h1>
         </header>
-        
+
         <main class="popup-content">
             <div class="status-section">
                 <div class="status-item">
@@ -23,7 +23,7 @@
                     <span class="status-value" id="currentLimit">-</span>
                 </div>
             </div>
-            
+
             <div class="settings-section">
                 <div class="setting-item">
                     <label for="tabLimitInput">Tab limit for this window:</label>
@@ -32,7 +32,7 @@
                         <button id="saveButton" class="save-btn">Save</button>
                     </div>
                 </div>
-                
+
                 <div class="setting-item">
                     <label for="defaultLimitInput">Default limit for new windows:</label>
                     <div class="input-group">
@@ -41,7 +41,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="groups-section">
                 <h3>Tab Group Limits</h3>
                 <div id="groupsList" class="groups-list">
@@ -53,17 +53,21 @@
                     <p>Set individual limits for each tab group in this window.</p>
                 </div>
             </div>
-            
+
             <div class="actions-section">
                 <button id="refreshButton" class="action-btn">Refresh Data</button>
             </div>
         </main>
-        
+
         <footer class="popup-footer">
             <div class="status-message" id="statusMessage"></div>
         </footer>
     </div>
-    
+
+    <div class="footer">
+    <a href="#" id="optionsLink">⚙️ Settings</a>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 </html>

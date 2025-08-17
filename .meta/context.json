@@ -19,8 +19,8 @@
   ],
   "current_context": {
     "open_questions": [],
-    "working_on": "selector",
-    "last_discussion": "All components implemented successfully! Extension is ready for testing.",
-    "updated_at": "2025-08-16T15:44:05.822240"
+    "working_on": "export-import",
+    "last_discussion": "Starting export/import settings implementation",
+    "updated_at": "2025-08-16T20:53:47.368405"
   }
 }

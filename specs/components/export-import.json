@@ -1,0 +1,19 @@
+{
+  "specification": {
+    "purpose": "Chrome extension component: export-import",
+    "technology": {
+      "runtime": "Chrome Extension (Manifest V3)",
+      "language": "JavaScript"
+    }
+  },
+  "cc_instructions": {
+    "priority": 1,
+    "estimated_effort": "1-2 hours",
+    "file_outputs": [
+      "options.html",
+      "options.js",
+      "options.css",
+      "utils/export-import.js"
+    ]
+  }
+}
