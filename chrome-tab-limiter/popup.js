@@ -617,9 +617,15 @@ async function loadTabsForSelector(selectorState) {
         tabs.forEach(tab => {
             const tabEl = document.createElement('div');
             tabEl.className = 'selector-tab-item';
+            
+            // Use chrome://favicon/ for external URLs to comply with CSP
+            const faviconUrl = tab.favIconUrl ? 
+                `chrome://favicon/size/16@1x/${tab.url}` : 
+                'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>';
+            
             tabEl.innerHTML = `
                 <div class="tab-info">
-                    <img src="${tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>'}" class="tab-favicon" width="16" height="16">
+                    <img src="${faviconUrl}" class="tab-favicon" width="16" height="16">
                     <span class="tab-title">${tab.title || 'Untitled'}</span>
                 </div>
             `;
@@ -640,6 +646,12 @@ async function loadTabsForSelector(selectorState) {
 // Show confirmation dialog for tab selection
 function showConfirmation(tab, selectorState) {
     const container = document.querySelector('.selector-container');
+    
+    // Use chrome://favicon/ for external URLs to comply with CSP
+    const faviconUrl = tab.favIconUrl ? 
+        `chrome://favicon/size/16@1x/${tab.url}` : 
+        'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>';
+    
     container.innerHTML = `
         <div class="confirmation-header">
             <h2>⚠️ Confirm Tab Closure</h2>
@@ -647,7 +659,7 @@ function showConfirmation(tab, selectorState) {
         </div>
         <div class="selected-tab">
             <div class="tab-info">
-                <img src="${tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>'}" class="tab-favicon" width="16" height="16">
+                <img src="${faviconUrl}" class="tab-favicon" width="16" height="16">
                 <span class="tab-title">${tab.title || 'Untitled'}</span>
             </div>
         </div>
