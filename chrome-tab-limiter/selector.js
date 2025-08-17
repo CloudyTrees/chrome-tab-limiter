@@ -271,17 +271,16 @@ function createTabItem(tab, index) {
     // Create favicon element
     const faviconElement = createFaviconElement(tab);
     
-    // Sanitize and truncate title and URL for display
-    const title = sanitizeTabTitle(tab.title);
-    const url = getDisplayUrl(tab.url);
+    // Privacy-conscious display - show minimal information
+    const title = sanitizeTabTitle(tab.title) || 'Tab';
     
     tabItem.innerHTML = `
         <input type="radio" name="tab" id="${radioId}" value="${tab.id}">
         <label for="${radioId}">
             ${faviconElement}
             <div class="tab-info">
-                <div class="tab-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
-                <div class="tab-url" title="${escapeHtml(tab.url)}">${escapeHtml(url)}</div>
+                <div class="tab-title">${escapeHtml(title)}</div>
+                <div class="tab-meta">Tab ${index + 1}</div>
             </div>
         </label>
     `;
