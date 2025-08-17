@@ -330,6 +330,11 @@ async function displayTabGroups(groups, groupCounts, ungroupedCount) {
 
         groupsListElement.innerHTML = html;
 
+        // Apply colors to group-color elements (CSP-compliant)
+        document.querySelectorAll('.group-color[data-color]').forEach(el => {
+            el.style.backgroundColor = el.dataset.color;
+        });
+        
         // Add event listeners to save buttons
         setupGroupEventListeners();
 
@@ -348,7 +353,7 @@ function createGroupItemHTML(groupId, title, color, count, limit) {
         <div class="group-item" data-group-id="${groupId}">
             <div class="group-info">
                 <div class="group-name">
-                    <div class="group-color" style="background-color: ${color}"></div>
+                    <div class="group-color" data-color="${color}"></div>
                     ${safeTitle}
                 </div>
                 <div class="group-count">${count} tab${count !== 1 ? 's' : ''}</div>

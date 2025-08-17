@@ -227,12 +227,7 @@ function createGroupHeader(group) {
     const color = getGroupColor(group?.color || 'grey');
     const title = group?.title || `Group ${group?.id || ''}`;
     
-    header.innerHTML = `
-        <div class="group-header-content">
-            <div class="group-color" style="background-color: ${color}"></div>
-            <span class="group-title">${escapeHtml(title)}</span>
-        </div>
-    `;
+    const headerContent = document.createElement('div');\n    headerContent.className = 'group-header-content';\n    \n    const colorDiv = document.createElement('div');\n    colorDiv.className = 'group-color';\n    colorDiv.style.backgroundColor = color;\n    \n    const titleSpan = document.createElement('span');\n    titleSpan.className = 'group-title';\n    titleSpan.textContent = title;\n    \n    headerContent.appendChild(colorDiv);\n    headerContent.appendChild(titleSpan);\n    header.appendChild(headerContent);
     
     return header;
 }
@@ -242,12 +237,7 @@ function createUngroupedHeader(tabCount) {
     const header = document.createElement('div');
     header.className = 'group-header ungrouped';
     
-    header.innerHTML = `
-        <div class="group-header-content">
-            <div class="group-color" style="background-color: #888888"></div>
-            <span class="group-title">Ungrouped Tabs (${tabCount})</span>
-        </div>
-    `;
+    const headerContent = document.createElement('div');\n    headerContent.className = 'group-header-content';\n    \n    const colorDiv = document.createElement('div');\n    colorDiv.className = 'group-color';\n    colorDiv.style.backgroundColor = '#888888';\n    \n    const titleSpan = document.createElement('span');\n    titleSpan.className = 'group-title';\n    titleSpan.textContent = `Ungrouped Tabs (${tabCount})`;\n    \n    headerContent.appendChild(colorDiv);\n    headerContent.appendChild(titleSpan);\n    header.appendChild(headerContent);
     
     return header;
 }
@@ -306,8 +296,7 @@ function createTabItem(tab, index) {
 // Create favicon element with fallback
 function createFaviconElement(tab) {
     if (tab.favIconUrl && isValidFaviconUrl(tab.favIconUrl)) {
-        return `<img src="${escapeHtml(tab.favIconUrl)}" class="favicon" alt="favicon" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
-                <div class="favicon default" style="display:none;">🌐</div>`;
+        const img = document.createElement('img');\n        img.src = tab.favIconUrl;\n        img.className = 'favicon';\n        img.alt = 'favicon';\n        \n        const fallback = document.createElement('div');\n        fallback.className = 'favicon default';\n        fallback.textContent = '🌐';\n        fallback.style.display = 'none';\n        \n        img.addEventListener('error', () => {\n            img.style.display = 'none';\n            fallback.style.display = 'block';\n        });\n        \n        const container = document.createElement('div');\n        container.appendChild(img);\n        container.appendChild(fallback);\n        return container.innerHTML;
     } else {
         // Use default icon
         return '<div class="favicon default">🌐</div>';
@@ -536,22 +525,7 @@ function updateKeyboardFocus() {
 
 // Show error message
 function showError(message) {
-    tabListElement.innerHTML = `
-        <div class="error-message" style="
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            color: #d93025;
-            text-align: center;
-            padding: 20px;
-        ">
-            <div style="font-size: 24px; margin-bottom: 12px;">❌</div>
-            <div style="font-weight: 500; margin-bottom: 8px;">Error</div>
-            <div style="font-size: 12px; color: #5f6368;">${escapeHtml(message)}</div>
-        </div>
-    `;
+    tabListElement.innerHTML = '';\n    \n    const errorDiv = document.createElement('div');\n    errorDiv.className = 'error-message';\n    errorDiv.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #d93025; text-align: center; padding: 20px;';\n    \n    const iconDiv = document.createElement('div');\n    iconDiv.style.cssText = 'font-size: 24px; margin-bottom: 12px;';\n    iconDiv.textContent = '❌';\n    \n    const titleDiv = document.createElement('div');\n    titleDiv.style.cssText = 'font-weight: 500; margin-bottom: 8px;';\n    titleDiv.textContent = 'Error';\n    \n    const messageDiv = document.createElement('div');\n    messageDiv.style.cssText = 'font-size: 12px; color: #5f6368;';\n    messageDiv.textContent = message;\n    \n    errorDiv.appendChild(iconDiv);\n    errorDiv.appendChild(titleDiv);\n    errorDiv.appendChild(messageDiv);\n    tabListElement.appendChild(errorDiv);
 }
 
 // Enhanced HTML escaping and input sanitization to prevent XSS
