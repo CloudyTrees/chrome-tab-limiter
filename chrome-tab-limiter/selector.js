@@ -22,10 +22,6 @@ let confirmButton;
 let cancelButton;
 let tabLimitElement;
 
-// Initialize selector window when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
-    debugLog('Selector initializing...');
-
 // Privacy-focused error handling - never log user data
 function safeErrorLog(message, error) {
     if (DEBUG_MODE) {
@@ -34,6 +30,10 @@ function safeErrorLog(message, error) {
         console.error(message);
     }
 }
+
+// Initialize selector window when DOM is loaded
+document.addEventListener('DOMContentLoaded', async () => {
+    debugLog('Selector initializing...');
     
     // Get DOM elements
     tabListElement = document.getElementById('tabList');
