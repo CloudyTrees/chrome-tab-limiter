@@ -624,8 +624,8 @@ async function loadTabsForSelector(selectorState) {
                 </div>
             `;
             
-            tabEl.addEventListener('click', async () => {
-                await handleTabSelected(tab.id, selectorState);
+            tabEl.addEventListener('click', () => {
+                showConfirmation(tab, selectorState);
             });
             
             tabListEl.appendChild(tabEl);
@@ -635,6 +635,35 @@ async function loadTabsForSelector(selectorState) {
         console.error('Error loading tabs for selector:', error);
         document.getElementById('selectorTabList').innerHTML = '<div class="error">Error loading tabs</div>';
     }
+}
+
+// Show confirmation dialog for tab selection
+function showConfirmation(tab, selectorState) {
+    const container = document.querySelector('.selector-container');
+    container.innerHTML = `
+        <div class="confirmation-header">
+            <h2>⚠️ Confirm Tab Closure</h2>
+            <p>Are you sure you want to close this tab?</p>
+        </div>
+        <div class="selected-tab">
+            <div class="tab-info">
+                <img src="${tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="%23ddd"/></svg>'}" class="tab-favicon" width="16" height="16">
+                <span class="tab-title">${tab.title || 'Untitled'}</span>
+            </div>
+        </div>
+        <div class="confirmation-actions">
+            <button id="confirmClose" class="confirm-btn">Yes, Close Tab</button>
+            <button id="cancelClose" class="cancel-btn">Cancel</button>
+        </div>
+    `;
+    
+    document.getElementById('confirmClose').addEventListener('click', async () => {
+        await handleTabSelected(tab.id, selectorState);
+    });
+    
+    document.getElementById('cancelClose').addEventListener('click', () => {
+        initializeSelectorMode(selectorState); // Go back to tab list
+    });
 }
 
 // Handle tab selection in popup selector

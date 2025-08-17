@@ -444,3 +444,77 @@ input[type="number"]:focus {
 .selector-actions {
     text-align: center;
 }
+
+/* Confirmation dialog styles */
+.confirmation-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.confirmation-header h2 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #d93025;
+}
+
+.confirmation-header p {
+    margin: 0;
+    font-size: 13px;
+    color: #5f6368;
+}
+
+.selected-tab {
+    border: 2px solid #ea4335;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 20px;
+    background-color: #fef7f0;
+}
+
+.selected-tab .tab-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.selected-tab .tab-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #202124;
+}
+
+.confirmation-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.confirm-btn {
+    background-color: #ea4335;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.confirm-btn:hover {
+    background-color: #d33b2c;
+}
+
+.cancel-btn {
+    background-color: #f8f9fa;
+    color: #5f6368;
+    border: 1px solid #dadce0;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.cancel-btn:hover {
+    background-color: #f1f3f4;
+}
