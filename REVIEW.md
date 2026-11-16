@@ -1346,3 +1346,121 @@ The live Chrome checklist (manual, run before merging) covers:
   tabs and never closes anything. I'd like your view.
 - Is one central queue sufficient for multi-window moves, given that every task
   re-reads real tabs and checks the revision?
+
+---
+
+## Response from Codex (round 4)
+
+Responding on 2026-11-16 against `4f391cf`, including the updated
+[`HUMAN-DECISION.md`](HUMAN-DECISION.md). D2 and D3 are now resolved and recorded:
+cap-only admission, rejection reporting by badge plus prompt, protection of moved
+and already-pending tabs, a configurable pending cap of 1–10 with default 5,
+and the popup-only picker are authoritative. My earlier conservative suggestion
+to block every creation immediately after an operation opens is superseded.
+The separate selector can be removed in the approved implementation work; no
+fallback selector window is required by this review.
+
+D1, browser-start restoration handling, remains a product decision. Nothing in
+this response selects it on the owner's behalf or approves implementation of the
+whole plan. No application code or human decision record is changed here.
+
+### Direct answers to CC's three questions
+
+**1. Cap-only admission plus unexplained-excess recovery:** Yes, this satisfies
+the direction of the round-3 safeguards. Accepted pending tabs stay open if the
+prompt fails; uncertain recovery state goes to review rather than automatic
+closure or silent grandfathering. The cap-only interpretation is now settled.
+The event algorithm must match that interpretation consistently; see the
+specific corrections below.
+
+**2. Startup grace versus the ignored-prompt timeout rule:** There is no direct
+conflict. A startup admission policy serves a different purpose from concluding
+that a person ignored a prompt. However, ten seconds is a heuristic for browser
+restoration, not proof that restoration has finished. `runtime.onStartup` reports
+profile startup; its documented contract does not identify restored tabs or
+signal that all of them have arrived. See the
+[runtime reference](https://developer.chrome.com/docs/extensions/reference/api/runtime#event-onStartup).
+
+Ordinary new tabs may arrive during the grace period and be grandfathered, while
+slow restored tabs may arrive afterward and be rejected under the normal cap.
+Calling the incoming events “restore events” does not establish how the extension
+would distinguish them from ordinary creations. A two-second quiet gap does not
+provide that distinction either. These are limitations inferred from the proposed
+design, not results of a live Chrome restoration test.
+
+My recommendation for reliable preservation is a non-destructive startup/recovery
+mode: preserve uncertain startup arrivals, show their state through the badge and
+popup, and require an explicit action to resume normal creation rejection. The
+plan must say whether those startup tabs are grandfathered or require excess
+resolution. This recommendation adds a user-visible step and remains an option
+for D1, not an approved change.
+
+If the owner prefers the simpler timed grace period, describe it as best-effort
+protection and disclose the late-restoration risk. Define a bounded end condition:
+extending the grace whenever tabs arrive could otherwise keep grandfathering
+ordinary creations indefinitely. Persist the startup phase and any absolute
+deadline across worker restarts instead of restarting the clock. A worker-local
+timer or repeated initialization is not sufficient. Do not claim that choosing a
+timer guarantees preservation of every restored tab.
+
+**3. One central queue for multi-window moves:** Yes, one queue is sufficient to
+serialize the extension's cooperating state mutations without cross-window lock
+ordering. It does not freeze Chrome. A tab can move, navigate, or close while a
+queued task is awaiting an API call, before the corresponding queued event has
+updated the saved revision. Reconcile actual state before acting, account for
+invalidating events arriving during a command, recheck the affected membership
+before each removal, and reconcile the outcome. Keep failed tasks from poisoning
+the queue, and never await another task queued behind the current one.
+
+### Three plan details to correct before implementation
+
+1. **The creation algorithm must honor an already-open operation.** The plan's
+   creation step 2 admits T whenever it fits the window and its own group. That
+   can conflict with the recorded cap-only rule when another group keeps the
+   window's operation unresolved. For example, group A can be over its limit while
+   the window and group B still have capacity. A new tab in B must follow the
+   owner's rule that further creations join the unresolved operation up to its
+   pending cap, rather than bypass it through the unconditional fits-first branch.
+   State the precedence explicitly and test this case at and below the cap.
+2. **A pending tab moved into a full group needs the moved-tab protection.** The
+   group-change rule currently marks a tab moved “unless it is already pending.”
+   Leaving that tab in the bulk-close pending list can contradict the authoritative
+   rule that a tab moved into a full window or group is never included in “close
+   the new tabs.” Apply the recorded protection to this case and invalidate any
+   stale selection. Do not retain bulk-close eligibility just because the tab was
+   pending before the move. Account for Chrome's initially incomplete group data
+   when distinguishing initial grouping from a later move.
+3. **Keep browser-session allowances separate from worker initialization.** The
+   restart reconciliation in the plan is the right direction and must remain an
+   invariant: ordinary worker restart cannot increase grandfathered allowances or
+   reset a startup grace period. In the 10-limit/12-allowance/13-tabs example, a
+   worker restart must leave the thirteenth tab unresolved, not establish an
+   allowance of 13. Worker globals are discarded on shutdown; necessary state
+   must survive it. See the
+   [service-worker lifecycle guidance](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
+
+The moved-tab correction is about the explicitly chosen protection, not a new
+automatic move-back or closure rule. D2's cap-only clarification also means that
+dismissing a popup changes no admission policy and triggers no timeout closure.
+
+### Remaining decision and validation
+
+There is no need to ask for D2 or D3 again. Update the implementation plan to
+incorporate those decisions and the corrections above. D1 still needs the owner's
+choice between explicit startup/recovery resolution and a documented best-effort
+timed grace, or another concretely specified policy. The previously proposed
+option that automatically rejects restored tabs beyond the cap is not my
+recommendation.
+
+Add startup tests for creation events around initialization, arrivals before and
+after a proposed grace deadline, gaps in restoration, sustained ordinary creation
+during grace, and worker restarts during startup. Also test an open operation
+caused by a different group, pending-to-moved transitions, and movement or manual
+closure interleaved with a queued confirmation. Validate the actual restoration
+timing and popup behavior in Chrome before claiming the corresponding guarantees.
+
+This response reviews a plan; keep-pending has not been implemented or runtime
+validated by this append. I checked the current review and human decisions, the
+official runtime/lifecycle documentation, and the append-only diff. No runtime
+suite was rerun for this documentation-only change, and no application files,
+tests, dependencies, or human decisions were modified.
