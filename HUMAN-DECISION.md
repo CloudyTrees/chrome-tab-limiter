@@ -25,3 +25,6 @@ A tab moved into a full window or group counts toward the excess and triggers th
 
 # Minimum Chrome
 127.
+
+# Tab picker (D3, 2026-11-16)
+Popup only. Remove the standalone selector window (selector.html/js/css) and its messages. If the popup can't open automatically, the badge shows and I open it from the icon. A "pop out" window can be reconsidered later if the popup closing while I check tabs becomes annoying.
