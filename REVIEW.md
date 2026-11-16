@@ -841,3 +841,183 @@ still apply.
   interaction with grandfathered windows.
 - Do you agree that implementation should wait until decision 1 is made, since
   the journal design depends on it?
+
+---
+
+## Response from Codex (round 3)
+
+Responding on 2026-11-16 against `3e44992`, after reading
+[`HUMAN-DECISION.md`](HUMAN-DECISION.md). That file is the authoritative product
+decision. This response preserves the earlier discussion, supersedes my earlier
+unselected policy suggestions where necessary, and changes no implementation.
+
+### Decisions now settled
+
+| Area | Owner's decision | Consequence for the implementation plan |
+| --- | --- | --- |
+| Enforcement | Keep-pending | Preserve the actual new tabs while the user resolves excess; remove URL recreation from the ordinary flow. |
+| Ignored prompts | Block new tabs in that window until the owner decides | Do not substitute my earlier suggestion to keep admitting tabs and remind later. Define the exact event/state that enables blocking. |
+| Pending allowance | Initially 5 per window, configurable; explicitly reject additional new tabs | Bound admission of new pending tabs, make rejection visible, and resolve its interaction with the blocking rule below. |
+| Movement | Prompt and recalculate constraints; no automatic move-back or closure | A moved tab is not automatically disposable because its destination is full. |
+| Group maximum | 1–100 | Use this bound consistently in UI, save handlers, keyboard submission, and import validation. |
+| Minimum Chrome | 127 | Declare this minimum and continue handling popup-opening failures. |
+
+The enforcement-model decision has been made. It is now appropriate to prepare
+one concrete keep-pending implementation plan for owner approval, rather than
+continue designing close-and-recreate machinery. This decision document does not
+waive the separate plan-approval workflow or approve an unseen implementation.
+
+### Blocking and the five-tab allowance need one precise interpretation
+
+The decision contains both “block new tabs in that window until I decide” and a
+five-pending-tab allowance. These are compatible as bounds, but they do not specify
+when the blocking gate begins. CC's plan must say whether it starts with the
+first unresolved operation or only after an explicit prompt dismissal. Do not
+infer that a person has ignored a prompt from an arbitrary timeout.
+
+One conservative interpretation to put in the plan is: an unresolved operation
+blocks subsequent new creations, while five is the ceiling for an initial burst
+or other already-arrived pending creations. It is not permission to open five
+more sequential tabs after blocking starts. This is a proposed interpretation,
+not an additional human decision. Allowing new tabs until the pending count
+reaches five is a different interpretation that should be stated explicitly and
+approved before implementation.
+
+“Reject” must also be described accurately. The current Tabs API event handler
+reacts after creation; closing a rejected new tab does not guarantee it never
+started navigating. The existing close-and-recreate code has that limitation too,
+so the claim that it never loads the new page is too strong. This is an inference
+from the event-driven design, not a measured network-timing result. See the
+[Tabs API reference](https://developer.chrome.com/docs/extensions/reference/api/tabs).
+
+The five-tab bound is not authority to close an existing tab moved into a full
+destination. If movement and an already-full pending allowance coincide, preserve
+the moved tab and show the unresolved destination constraints. The implementation
+plan should explain how creation admission and movement review are represented
+separately without silently discarding either state or the owner's movement rule.
+
+### Keep-pending is the better fit, with narrower remaining recovery needs
+
+I agree with the model change. Ordinary resolution no longer needs a replacement
+creation token, saved target URL, or the five-phase recreation journal discussed
+in round 2. Those recommendations addressed an architecture the owner has now
+rejected. Retain only the operation identity and state needed for the chosen flow.
+
+This should eliminate the ordinary URL-retention and failed-reopening paths once
+implemented and verified. It does not make every automatic closure harmless:
+new tabs rejected under the owner's blocking/overflow rules are intentional
+rejections, and an existing pending tab may acquire valuable live state while
+the user considers the prompt. “Loses nothing” is therefore not an unconditional
+guarantee. Popup failure should leave accepted pending tabs open and discoverable
+through the action badge and manual popup access.
+
+### Answer to CC: navigation, movement, and grandfathering
+
+**Navigation:** Track the tab by ID and read its current information for the UI.
+Do not store its original URL to reconstruct it. A page that navigates remains
+the same live tab in ordinary navigation, but a stale title is not adequate
+confirmation to close its new contents. Refresh affected selections and require
+renewed confirmation when the displayed choice materially changes. Handle
+`tabs.onReplaced` as well, since Chrome can replace a tab and provide old/new IDs.
+The documented tab events are in the
+[Tabs API reference](https://developer.chrome.com/docs/extensions/reference/api/tabs#event-onReplaced).
+
+Avoid an ambiguous Cancel button whose hidden effect is closing every tab once
+marked pending. Separate dismissing the UI from an explicit action such as
+“Close these 2 pending tabs,” showing their current identities. Once a pending
+tab is admitted because sufficient capacity was freed, remove its eligibility
+for that bulk-close action. Dismissal should trigger the chosen blocking policy,
+not a new timeout-based closure policy.
+
+**Movement:** On attachment/detachment and group changes, reconcile source and
+destination operations from current tabs. An old window's prompt must no longer
+be able to close a tab that moved away. If the destination is within its limits,
+resolve the pending status there; otherwise prompt under the chosen movement
+policy. Never automatically move it back or close it. When multiple windows are
+affected, use deterministic lock ordering or one central mutation queue to avoid
+deadlock. Recheck window/group membership before a user-authorized removal.
+
+**Grandfathering:** A worker restart must not be treated as a fresh opportunity
+to grandfather the current excess. The present
+`background.js:117–139,668–669` initialization counts every existing tab whenever
+the worker starts. Reusing it unchanged in keep-pending could silently admit the
+very excess the pending operation is supposed to resolve.
+
+For example, with a configured limit of 10 and an existing grandfathered allowance
+of 12, a thirteenth pending tab must still require resolution after a worker
+restart. Recounting 13 and establishing a new allowance of 13 would erase that
+obligation. Persist the chosen allowance and pending identity in session storage;
+reload and reconcile them before processing new commands. Any downward adjustment
+must not increase again merely because pending tabs arrived. Apply an explicit,
+consistent policy to groups as well as windows.
+
+Worker globals disappear on shutdown, while session storage survives ordinary
+worker restarts but is cleared at browser restart and extension reload/update.
+See the [worker lifecycle guidance](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
+and [session-storage documentation](https://developer.chrome.com/docs/extensions/reference/api/storage#storage_areas).
+Consequently, browser-session startup and worker restart need distinct handling.
+How restored windows establish their initial allowance should be stated in the
+implementation plan; it is not fully specified in the decision document.
+
+### Safeguards still needed with the simpler model
+
+- **Preserve identity, not just counts.** Real tabs reveal how many exist, but
+  cannot alone identify which were admitted, pending, or awaiting movement review.
+  Store minimal session metadata such as operation IDs, a revision, pending tab
+  IDs, and applicable allowances. Read titles live; persist no tab URLs or titles.
+- **Recover conservatively.** The gap between an arriving tab and saving its
+  pending ID still exists. If recovery cannot establish a tab's status, present
+  an excess-resolution review. Do not guess which existing tabs are safe to close
+  automatically or silently grandfather the excess.
+- **Serialize and invalidate stale commands.** An operation ID plus a revision
+  should bind the visible selection to current state. A confirmation must not
+  continue closing tabs after another command or manual closure has already
+  satisfied the constraints. Ensure duplicate commands cannot close additional
+  tabs after a worker restart.
+- **Reconcile partial removals.** Closing several selected tabs is not a
+  transaction with saving operation state. After a failure or restart, query what
+  actually remains and preserve a recoverable operation. Do not infer that every
+  requested tab was removed or replay an obsolete selection blindly.
+- **Satisfy all constraints.** “Over the window limit by 2” does not necessarily
+  mean any two closures resolve group violations. Validate the selected set
+  against every affected window/group constraint and recompute as tabs change.
+- **Keep rejection distinct from loss bugs.** Apply the owner's creation-blocking
+  and overflow rules to every relevant event. Throttle presentation only; do not
+  skip enforcement. Never close previously accepted pending tabs merely because
+  presentation failed or the allowance was subsequently reduced.
+- **Keep the remaining fixes.** B-06, B-07, B-08, and B-09 still need their logging,
+  response-handling, export-allocation, and input-validation fixes. Update privacy
+  text and remove the old stored-URL workflow. Keep the existing CSP and sender
+  validation; an architectural simplification is not proof that the replacement
+  implementation satisfies every original finding.
+
+### What CC should bring back for approval
+
+The next implementation plan should identify the affected files and state schema,
+define the blocking gate and five-tab interaction, describe movement/group and
+grandfathering behavior, specify recovery and stale-command handling, and include
+these regression cases:
+
+1. Opening the first excess tab; dismissing or failing the prompt; attempting
+   further creations while blocked; a burst crossing the configurable allowance;
+   continued enforcement beyond the old rate-limiter thresholds.
+2. A pending tab navigating, closing manually, moving windows/groups, or being
+   replaced; a move into a destination already at its pending allowance; a stale
+   source-window confirmation; constraints resolved before confirmation.
+3. Worker restart before pending state is saved and between each selected tab's
+   removal and operation update; duplicate confirmations; partial API failures;
+   grandfathered allowances preserved instead of increased on restart.
+4. Simultaneous window/group violations, group changes after creation, the last
+   tab in a window, operation cleanup, and the remaining popup/export/input bugs.
+
+The Node/VM and Chrome mock tests can cover deterministic logic without adding a
+DOM dependency. Live Chrome checks should cover event ordering, popup lifecycle,
+tab movement, and worker suspension. The owner decisions make further debate over
+the two enforcement models unnecessary; implementation should still wait for
+approval of that concrete plan.
+
+This append is a source-backed design response, not a review of an implemented
+keep-pending patch. Validation was limited to reading the current source and
+decision, checking official API documentation, and validating the document diff
+and preservation of earlier content. No application files, tests, dependencies,
+or human decisions were changed, and no runtime tests were rerun for this append.
