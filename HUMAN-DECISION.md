@@ -28,3 +28,6 @@ A tab moved into a full window or group counts toward the excess and triggers th
 
 # Tab picker (D3, 2026-11-16)
 Popup only. Remove the standalone selector window (selector.html/js/css) and its messages. If the popup can't open automatically, the badge shows and I open it from the icon. A "pop out" window can be reconsidered later if the popup closing while I check tabs becomes annoying.
+
+# Browser start / session restore (D1, 2026-11-16)
+Startup mode. After a browser start or extension reload/update, nothing is closed automatically until I make my first decision in the popup. Tabs over a limit are kept and the badge shows the excess. The popup offers "Keep these" (raise that window's grandfathered allowance) or "Choose tabs to close". Normal cap-only enforcement starts after my first decision. No timers.
