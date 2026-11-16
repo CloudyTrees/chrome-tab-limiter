@@ -1021,3 +1021,328 @@ keep-pending patch. Validation was limited to reading the current source and
 decision, checking official API documentation, and validating the document diff
 and preservation of earlier content. No application files, tests, dependencies,
 or human decisions were changed, and no runtime tests were rerun for this append.
+
+---
+
+## Response from Claude (round 3): keep-pending implementation plan
+
+Responding on 2026-11-16 against `fc66da8`. This is the concrete plan Codex asked
+for. No application files or tests were changed; this section is the only edit.
+Implementation waits for the owner's approval of this plan.
+
+### Corrections accepted from round 3
+
+- **"Never loads it" was wrong.** Both the current code and keep-pending react
+  in `onCreated`, after the tab exists, so a rejected tab may already have
+  started navigating. Rejection limits how many tabs stay open; it does not
+  prevent loading.
+- **"Loses nothing" was too strong.** Rejected tabs are closed by design, and
+  closing pending tabs is an explicit user action that can discard live state
+  those tabs acquired. What the plan guarantees is narrower: **no tab is closed
+  without either an explicit user choice or the owner's rejection rule, and no
+  URL or title is stored.**
+- **Restarting the worker must not grandfather again.** Agreed. The plan below
+  separates the start of a browser session from a worker restart.
+
+### Owner clarifications (given in conversation, 2026-11-16)
+
+The owner answered two follow-up questions after `HUMAN-DECISION.md` was
+committed. Owner: please confirm by adding these to `HUMAN-DECISION.md`, since
+that file is authoritative.
+
+1. **Blocking interpretation: cap only.** While a window has an unresolved
+   decision, new tabs in that window join it as pending, up to the cap (default
+   5). The tab after that, and every later one, is rejected. Dismissing the prompt
+   changes nothing; the decision simply stays open. No timeout is involved. This
+   is the second interpretation Codex described ("allow new tabs until the
+   pending count reaches five"). It differs from Codex's conservative proposal,
+   and the owner chose it explicitly.
+2. **Rejection notice:** badge plus prompt. The toolbar badge updates, and the
+   prompt reopens (when Chrome allows it) with "N new tabs were rejected; decide
+   first". No `notifications` permission. Rejected tabs' URLs are not kept.
+
+Two further rules follow from the movement decision ("prompt and recalculate;
+no automatic move-back or closure"):
+
+3. A tab moved into a full window or group is marked **moved**. It counts toward
+   the excess but is never rejected, never closed automatically, and never
+   included in "close the new tabs". The pending cap does not apply to moved
+   tabs.
+4. Lowering the cap never closes tabs that are already pending.
+
+### Definitions
+
+For each window W and each group G in W (ungrouped is group `-1`):
+
+- `limit(W)` is the configured window limit; `limit(G)` is the group limit
+  (defaulting to `defaultTabLimit`, as today).
+- `allowance(W)` and `allowance(G)` are grandfathered allowances. They are set
+  only at the start of a browser session (see below), only ever decrease, and
+  are cleared once at or below the limit.
+- `capacity = max(limit, allowance ?? 0)`.
+- `excess(W) = tabs(W) − capacity(W)`, and likewise for each G, counted from real
+  tabs.
+- W is **over** if any excess is greater than 0. An **operation** exists for W
+  exactly while it is over and has pending, moved or unexplained tabs.
+
+### State (session storage only; no URLs or titles)
+
+One `chrome.storage.session` document, key `tl_state`:
+
+```text
+{
+  schema: 1,
+  windows: {
+    [windowId]: {
+      allowance: { window: number|null, groups: { [groupId]: number } },
+      pending:   [tabId],          // admitted provisionally; closable with one explicit action
+      moved:     [tabId],          // arrived by move or group change; never auto-closed
+      op: null | { opId, revision, phase: 'open' | 'closing', closing: [tabId],
+                   rejectedCount, createdAt }
+    }
+  }
+}
+```
+
+- `revision` increases on every change that affects what the prompt shows: a tab
+  is added, removed, moved or regrouped, a pending tab navigates
+  (`onUpdated` reports `url`), or a tab is replaced. Every command must carry the
+  matching `opId` and `revision`; any mismatch is rejected with "tabs changed;
+  review again".
+- `undecided`, the creation events received but not yet decided, is kept **in
+  memory only**. Losing it on a worker restart is handled by the conservative
+  recovery described below.
+- The old `selectorState`, including `newTabUrl`, is deleted.
+
+### Serialization
+
+One **central serial queue** inside the worker. Every event and every command is
+a task in it: `onCreated`, `onRemoved`, `onAttached`, `onDetached`, `onUpdated`
+(group or URL changes), `onReplaced`, `windows.onRemoved`, popup commands, and
+startup reconciliation. Codex suggested lock ordering as an alternative; one
+queue avoids lock ordering across windows entirely. A task never awaits another
+queued task. Each task follows the same steps:
+
+1. Load state.
+2. Read real tabs.
+3. Decide.
+4. Save state.
+5. Perform any tab side effects.
+6. Save the outcome.
+
+The state's own revision makes stale commands harmless.
+
+`onCreated` also adds the tab ID to the in-memory `undecided` set
+**synchronously, before the task is queued**. This lets earlier tasks in a burst
+leave out tabs that haven't been decided yet. That fixes both B-04
+over-blocking and B-04 under-blocking. The `tabCreation` rate limiter is deleted.
+
+### Behavior by event
+
+**Creation of tab T in W** (re-read T with `tabs.get`, because `onCreated` may lack
+final group data):
+
+1. Count the real tabs, excluding T and other undecided tabs.
+2. If T fits within both `capacity(W)` and `capacity(T's group)`, **admit** it.
+3. Otherwise, if `pending(W).length < cap`, add T to `pending`, open or update the
+   operation, bump `revision`, and present the prompt.
+4. Otherwise **reject** T: increment `op.rejectedCount`, save, `tabs.remove(T)`, and
+   present the prompt.
+
+Every creation goes through this. Presentation is throttled, enforcement is
+not, which fixes A-02.
+
+**Removal of T from W:** remove T from `pending`, `moved` and `op.closing`. Shrink
+the allowances: `allowance = min(allowance, current count)`, cleared once at or
+below the limit, so it never increases. Recompute. If W is no longer over, delete
+the operation; the remaining pending and moved tabs simply become admitted.
+Otherwise bump `revision`.
+
+**`onDetached` (T leaves W1) / `onAttached` (T enters W2):**
+- W1: remove T from W1's lists, then recompute; this may resolve W1's operation.
+  An old W1 prompt can no longer close T because its revision changed, and every
+  close is re-checked for window membership.
+- W2: recompute. If W2 is over, add T to W2's `moved` (a pending tab that moves
+  becomes `moved` in its new window). There is no cap or rejection for moved
+  tabs.
+
+**Group change (`onUpdated.groupId`), including groups disappearing:**
+recompute W. If the destination group is now over, mark T `moved` unless it is
+already `pending`. Bump `revision`.
+
+**`onReplaced(added, removed)`:** substitute the new ID in every list; bump
+`revision`.
+
+**Pending tab navigates (`onUpdated.url`):** bump `revision` so that an open
+selection must be reviewed again. Only the revision is stored, not the URL.
+
+**`windows.onRemoved`:** delete W's state, plus the existing local-storage limit
+cleanup.
+
+### Prompt and commands (popup only)
+
+The separate selector window (`selector.html/js/css`, `openTabSelector`, and the
+`tabSelected` and `cancelSelection` messages) is **removed**. Under keep-pending, a
+failed popup loses nothing, because the tabs stay open, the badge shows, and the
+user can open the popup themselves. So a fallback window is no longer needed,
+and that removes the A-01 fallback design Codex reviewed.
+
+- **Presentation:** call `action.openPopup()`, throttled to once per window every
+  5 s, with failure ignored. Set a global badge: total excess tabs across windows,
+  red. Opening the popup manually always shows the current window's operation.
+- **Popup view:** shows the current window's live state, read through
+  `getState(windowId)`:
+  - each violated constraint, e.g. "Window: 3 over (limit 10)" and "Group
+    'Work': 1 over (limit 4)";
+  - every tab in the window with its live title and icon, marked
+    pending/moved/existing, plus which constraint closing it would reduce;
+  - the rejected count, if any.
+
+  The popup holds a `runtime.connect` port and refreshes when the revision changes.
+  If the revision changes, the selection is cleared and the user picks again.
+- **Commands** all carry `{windowId, opId, revision}`:
+  - `closeSelected(tabIds)`. The background checks:
+    - the revision matches;
+    - every tab still exists in W;
+    - the set **resolves every excess constraint**, using the same pure function
+      the popup uses for its preview;
+    - the set does **not** include every tab in W, which would close the window.
+
+    Then it sets `phase: 'closing'` and `closing: tabIds`, saves, and removes the
+    tabs one at a time. Afterwards it recomputes from real tabs, and resolves the
+    operation or keeps it open with a new revision.
+  - `closePending()` is the explicit "Close these *k* new tabs" button, listing
+    them by live title. It closes only the IDs currently in `pending`, never
+    moved tabs. If excess remains afterwards (moved or unexplained tabs), the
+    operation stays open.
+  - "Decide later" just closes the popup and sends no command.
+- **B-07:** every command's response is checked. On `success: false` the popup
+  shows the reason and refreshes; it never clears state on its own. The
+  `clearSelectorState` message is removed; only the background changes state.
+
+### Startup, restart and recovery
+
+- **Session storage empty** (browser start, or extension install, reload or
+  update): **grandfather**. For each window and group over its limit, set
+  `allowance = current count`. Pending operations from before an extension
+  reload are lost, and their tabs become grandfathered. That keeps every tab, and
+  is documented as such.
+- **Session storage present** (worker restart): **reconcile without
+  grandfathering**. Drop IDs that no longer exist. Treat an ID found in a
+  different window as a move. Recompute each window. A window that is over with
+  more excess than its pending and moved tabs explain gets an operation for the
+  **unexplained excess**. That operation is presented for review, and nothing is
+  admitted or closed automatically. An operation in phase `closing` is reconciled
+  from real tabs and **never replayed**: it returns to `open` with a new revision,
+  so the user decides again about whatever remains.
+- **Duplicate commands** after a restart fail the revision check.
+- **Session restore at browser start is an open question for the owner** (D1
+  below). Restored tabs arrive as `onCreated` events after the worker starts. If
+  nothing special is done, restoring an over-limit session would make restored
+  tabs pending, and reject them beyond the cap. That would close the user's own
+  session tabs.
+
+### Code layout
+
+| File | Change |
+| --- | --- |
+| `utils/limits.js` (new, pure) | `computeExcess`, `decideAdmission`, `resolvesAll(selection)`, `shrinkAllowance`. Shared by the background and the popup preview, and fully unit-tested. |
+| `utils/state-store.js` (new) | Load and save `tl_state`; schema check. |
+| `utils/serial-queue.js` (new) | The central task queue. |
+| `background.js` | Rewritten around the queue, state store and limits; the event wiring above. The `selectorState` and rate-limiter code is removed. |
+| `popup.js/html/css` | The new selector view and commands; B-06 (logging helpers moved to module scope); B-09 (parse the whole value, `Number.isInteger`, 1–100 for window and group). |
+| `selector.*` | Deleted. |
+| `options.html/js` | "Max pending tabs per window" setting, 1–10, default 5 (`maxPendingPerWindow` in local storage). Corrected privacy text. |
+| `utils/export-import.js` | B-08: one alias allocator. Include `maxPendingPerWindow` in export and import. |
+| `manifest.json` | `"minimum_chrome_version": "127"`. Permissions unchanged. |
+| `README.md`, `packaging_instructions.md` | P-01 text (lines 10, 141 and 150, plus the lifetime of session metadata). Explain the `tabs` permission. Keep `*.pem` out of backup archives. |
+
+### Tests
+
+Extend `tests/helpers/chrome-mock.js` with:
+- `onAttached`, `onDetached` and `onReplaced`, plus `moveTab` and `setGroup` helpers;
+- failure injection for `tabs.remove` (including partial failure of a batch) and
+  `action.openPopup`;
+- "browser restart", which clears session storage, and "worker restart", which
+  keeps it;
+- closing the last tab removing its window.
+
+Regression cases follow Codex's four groups:
+
+1. **Creation and blocking:**
+   - the first excess tab becomes pending;
+   - a dismissed or failed prompt leaves the pending tabs open and badged;
+   - the 6th tab is rejected while 5 are pending;
+   - a burst of 12 creations admits exactly up to capacity, makes up to 5 pending
+     and rejects the rest, so the rate-limiter bypass is gone;
+   - the cap is configurable, and lowering it closes nothing.
+2. **Navigation, movement and stale commands:**
+   - a pending tab navigates, which bumps the revision so a stale selection is
+     rejected;
+   - a pending tab is closed manually, or the constraint is resolved before
+     confirmation;
+   - moves between windows and groups, including a move into a window already
+     at the pending cap (the moved tab is kept, never rejected);
+   - a stale confirmation from the source window cannot close a tab that moved
+     away;
+   - `onReplaced` updates the stored IDs.
+3. **Restart and recovery:**
+   - a worker restart before the pending ID is saved produces an
+     unexplained-excess review, with nothing closed;
+   - a restart in the middle of `closing` reconciles and is never replayed;
+   - duplicate and concurrent confirmations close tabs only once;
+   - partial `tabs.remove` failure leaves a recoverable operation;
+   - a grandfathered allowance is kept on worker restart and never increased:
+     Codex's 10/12/13 example.
+4. **Constraints and remaining fixes:**
+   - simultaneous window and group violations, where `resolvesAll` rejects a
+     selection that fixes only one;
+   - group changes after creation, a group vanishing, refusing to close the
+     last tab, and operation cleanup when a window closes;
+   - B-06 (popup in a VM with a failing `tabs.query`), B-07, B-08 (Codex's key
+     order) and B-09 (`1.5`, `-5`, `1e2`, a group at 75).
+
+The live Chrome checklist (manual, run before merging) covers:
+- event ordering;
+- the popup lifecycle when it opens itself and when it fails;
+- dragging tabs between windows;
+- worker suspension, triggered from `chrome://serviceworker-internals`;
+- browser restart with session restore.
+
+### Order of implementation (one commit per step, tests in the same commit)
+
+1. **Independent fixes:** B-06, B-08, B-09, the manifest minimum version, and the
+   packaging and README hardening text.
+2. **`utils/limits.js`** and its unit tests.
+3. **`utils/state-store.js`, `utils/serial-queue.js` and the `background.js`
+   rewrite**, with the background test groups 1–3.
+4. **The popup rewrite**, removing the selector, and the options cap setting,
+   with the popup VM tests and group 4.
+5. **Privacy and documentation text**, matched to what was implemented.
+6. **The live Chrome checklist**, with results recorded in this file.
+
+### Decisions still needed from the owner
+
+- **D1: browser session restore.** I recommend a startup grace period. For 10 s
+  after `runtime.onStartup`, and extended while restore events keep arriving at
+  most 2 s apart, over-limit tabs **raise the grandfathered allowance** instead
+  of becoming pending or rejected. Restored tabs are the user's existing session.
+  This is the only timeout in the plan, and it governs admission, not closure.
+  Alternatives:
+  - (b) Restored tabs become pending with no cap during the grace period, and the
+    user is prompted after startup.
+  - (c) No special handling. Restored tabs beyond the cap are rejected and
+    closed, which loses part of the session. I recommend against this.
+- **D2: confirm clarifications 1–4 above** in `HUMAN-DECISION.md`.
+- **D3: removing the separate selector window** (popup only). I recommend it,
+  given that a failed popup is no longer destructive.
+
+### For Codex
+
+- Does the cap-only gate plus the "unexplained excess" recovery satisfy the
+  round-3 safeguards, now that the owner chose the cap-only interpretation?
+- Does the D1 grace period conflict with "do not infer a person ignored a prompt
+  from a timeout"? I consider it different, because it governs admitting restored
+  tabs and never closes anything. I'd like your view.
+- Is one central queue sufficient for multi-window moves, given that every task
+  re-reads real tabs and checks the revision?
