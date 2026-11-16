@@ -66,40 +66,55 @@ chrome-tab-limiter/
 ├── options.html/js/css    # Export/import settings page
 ├── utils/
 │   ├── storage.js         # Chrome storage utilities
+│   ├── validation.js      # Message/URL validation for the background worker
+│   ├── sanitize.js        # HTML escaping and title/favicon sanitizing
 │   └── export-import.js   # Settings backup utilities
 └── icons/                 # Extension icons (16, 48, 128px)
 ```
+
+Development-only files live outside this folder and are not packaged:
+`tests/` (unit tests) and `package.json` (test runner config) at the repository root.
 
 ## Configuration
 
 ### Default Settings
 - Default tab limit: 10 tabs per window
-- No limit on tab groups by default
-- Settings sync across devices (if Chrome sync is enabled)
+- Each tab group (and the ungrouped tabs) uses the default limit unless overridden
+- Settings are stored locally and do not sync across devices
 
 ### Storage Structure
-Settings are stored in Chrome's sync storage:
+Settings are stored in `chrome.storage.local` as flat keys:
 ```json
 {
-  "defaultLimit": 10,
-  "windowLimits": {
-    "windowId": limit
-  },
-  "groupLimits": {
-    "windowId_groupId": limit,
-    "windowId_ungrouped": limit
-  }
+  "defaultTabLimit": 10,
+  "tabLimit_<windowId>": 5,
+  "groupLimit_<windowId>_<groupId>": 4,
+  "groupLimit_<windowId>_ungrouped": 6,
+  "hasSeenWelcome": true
 }
 ```
+While the tab selector is open, the pending "tab to reopen" is kept in
+`chrome.storage.session` (in memory only, cleared when the browser exits).
 
 ## Development
 
 ### Prerequisites
-- Chrome browser (for testing)
-- Text editor
+- Chrome browser (for manual testing)
+- Node.js 22+ (for unit tests; no npm packages required)
 - Basic knowledge of Chrome Extension APIs
 
-### Testing
+### Unit Tests
+From the repository root:
+```bash
+npm test          # or: node --test tests/
+```
+Tests use Node's built-in test runner and an in-memory `chrome.*` stand-in
+(`tests/helpers/chrome-mock.js`). `background.test.js` loads the real
+`background.js` and drives it through its tab events and runtime messages.
+DOM behavior (popup/selector rendering, keyboard handling) is not covered and
+still needs a manual check.
+
+### Manual Testing
 1. Make changes to the code
 2. Go to `chrome://extensions/`
 3. Click the refresh icon on the Tab Limiter extension

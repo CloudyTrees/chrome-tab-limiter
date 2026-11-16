@@ -1,0 +1,124 @@
+import { describe, it, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+import { createChromeMock } from './helpers/chrome-mock.js';
+
+// export-import.js is a classic script that attaches its API to `window`
+// (loaded by options.html). Evaluate it with a stub window and our chrome mock.
+const SOURCE = readFileSync(
+    new URL('../chrome-tab-limiter/utils/export-import.js', import.meta.url),
+    'utf8'
+);
+
+function loadExportImport(chrome) {
+    const window = {};
+    new Function('window', 'chrome', SOURCE)(window, chrome);
+    return window.TabLimiterExportImport;
+}
+
+let harness;
+let api;
+
+beforeEach(() => {
+    harness = createChromeMock();
+    api = loadExportImport(harness.chrome);
+});
+
+const validFile = (settings = {}) => ({
+    version: '1.0.0',
+    settings: { defaultTabLimit: 12, windowLimits: {}, groupLimits: {}, ...settings }
+});
+
+describe('validateImportData', () => {
+    it('accepts a well-formed settings file', () => {
+        assert.deepEqual(api.validateImportData(validFile()), { valid: true });
+    });
+
+    it('rejects non-objects and missing settings', () => {
+        for (const data of [null, 'x', 5, {}, { settings: 'nope' }]) {
+            assert.equal(api.validateImportData(data).valid, false, JSON.stringify(data));
+        }
+    });
+
+    it('rejects out-of-range or non-integer limits', () => {
+        for (const limit of [0, -1, 101, 1.5, '10', null]) {
+            assert.equal(api.validateImportData(validFile({ defaultTabLimit: limit })).valid, false, String(limit));
+        }
+    });
+
+    it('rejects files from a newer major version', () => {
+        assert.equal(api.validateImportData({ ...validFile(), version: '2.0.0' }).valid, false);
+    });
+
+    it('rejects prototype-pollution and malformed keys', () => {
+        const polluted = JSON.parse('{"settings":{"windowLimits":{"__proto__":5}}}');
+        assert.equal(api.validateImportData(polluted).valid, false);
+
+        const badWindowKey = validFile({ windowLimits: { 'window 1; drop': 5 } });
+        assert.equal(api.validateImportData(badWindowKey).valid, false);
+
+        const badGroupKey = validFile({ groupLimits: { tabLimit_1: 5 } });
+        assert.equal(api.validateImportData(badGroupKey).valid, false);
+    });
+});
+
+describe('exportSettings', () => {
+    it('anonymizes window and group IDs and omits the date', async () => {
+        await harness.chrome.storage.local.set({
+            defaultTabLimit: 9,
+            tabLimit_1234567: 5,
+            groupLimit_1234567_888: 4,
+            hasSeenWelcome: true
+        });
+
+        const exported = await api.exportSettings();
+        const json = JSON.stringify(exported);
+
+        assert.equal(exported.settings.defaultTabLimit, 9);
+        assert.equal(json.includes('1234567'), false, 'real window ID leaked');
+        assert.equal(json.includes('888'), false, 'real group ID leaked');
+        assert.equal(exported.exportDate, 'Privacy Protected');
+        assert.equal(json.includes('hasSeenWelcome'), false);
+    });
+
+    it('produces a file that passes import validation', async () => {
+        await harness.chrome.storage.local.set({ defaultTabLimit: 9, tabLimit_1: 5, groupLimit_1_2: 4 });
+        const exported = await api.exportSettings();
+        assert.deepEqual(api.validateImportData(exported), { valid: true });
+    });
+});
+
+describe('importSettings', () => {
+    it('replace mode (the default) clears existing settings first', async () => {
+        await harness.chrome.storage.local.set({ defaultTabLimit: 3, tabLimit_1: 5 });
+
+        const result = await api.importSettings(validFile({ defaultTabLimit: 12 }));
+
+        assert.equal(result.success, true);
+        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 12 });
+    });
+
+    it('merge mode keeps other settings and lets imported values win', async () => {
+        await harness.chrome.storage.local.set({ defaultTabLimit: 3, tabLimit_1: 5 });
+
+        await api.importSettings(validFile({ defaultTabLimit: 12 }), { mergeLimits: true });
+
+        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 12, tabLimit_1: 5 });
+    });
+
+    it('never imports window or group limits (IDs are not portable)', async () => {
+        const result = await api.importSettings(
+            validFile({ windowLimits: { window_1: 5 }, groupLimits: { groupLimit_window_1_group_1: 4 } })
+        );
+        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 12 });
+        assert.equal(result.privacyNotice.skippedWindowLimits, 1);
+        assert.equal(result.privacyNotice.skippedGroupLimits, 1);
+    });
+
+    it('rejects invalid data without touching storage', async () => {
+        await harness.chrome.storage.local.set({ defaultTabLimit: 3 });
+        await assert.rejects(api.importSettings(validFile({ defaultTabLimit: 999 })), /Invalid import data/);
+        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 3 });
+    });
+});

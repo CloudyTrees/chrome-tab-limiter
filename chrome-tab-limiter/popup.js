@@ -1,4 +1,5 @@
 // Popup script for Tab Limiter extension
+import { escapeHtml } from './utils/sanitize.js';
 
 // Debug logging configuration
 const DEBUG_MODE = false; // Set to false in production
@@ -552,17 +553,6 @@ function getGroupColor(chromeColor) {
     };
 
     return colorMap[chromeColor] || '#5f6368';
-}
-
-// Enhanced HTML escaping for group display
-function escapeHtml(text) {
-    if (typeof text !== 'string') {
-        text = String(text);
-    }
-
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 // Handle keyboard shortcuts

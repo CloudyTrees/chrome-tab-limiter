@@ -1,5 +1,6 @@
 // Background service worker for Tab Limiter extension
 import { getTabLimit, removeWindowData, getGroupLimit, removeAllGroupData } from './utils/storage.js';
+import { isTrustedSender, isSafeReopenUrl, validateMessageRequest } from './utils/validation.js';
 
 // Data structures to track tab counts and pending operations
 const tabCounts = new Map(); // windowId -> current tab count
@@ -181,6 +182,24 @@ async function updateTabCount(windowId, delta) {
     return newCount;
 }
 
+// Set window and group counts from the window's actual tabs. `excludeTabId`
+// leaves out a just-created tab that has not been admitted yet. Goes through
+// updateTabCount so grandfathered counts still shrink as tabs close.
+async function syncWindowCounts(windowId, excludeTabId) {
+    const tabs = (await chrome.tabs.query({ windowId })).filter(t => t.id !== excludeTabId);
+
+    const windowGroups = {};
+    for (const t of tabs) {
+        windowGroups[t.groupId] = (windowGroups[t.groupId] || 0) + 1;
+    }
+    groupCounts.set(windowId, windowGroups);
+
+    const delta = tabs.length - getTabCount(windowId);
+    if (delta !== 0) {
+        await updateTabCount(windowId, delta);
+    }
+}
+
 // Check if adding a tab would exceed the limit (accounting for grandfathered tabs)
 async function wouldExceedLimit(windowId) {
     const currentCount = getTabCount(windowId);
@@ -308,12 +327,11 @@ async function handleTabCreated(tab) {
         }
         
         debugLog(`Tab created in window ${tab.windowId}, group ${tab.groupId || 'ungrouped'}`);
-        
-        // Get current counts for debugging
-        const currentTabCount = getTabCount(tab.windowId);
-        const tabLimit = await getTabLimit(tab.windowId);
-        debugLog(`Current tabs: ${currentTabCount}, Limit: ${tabLimit}`);
-        
+
+        // Recount from the window's actual tabs (excluding the new one) rather
+        // than trusting running counters, which can lag behind a just-closed tab
+        await syncWindowCounts(tab.windowId, tab.id);
+
         // Check if limit would be exceeded (before counting the new tab)
         const wouldExceedGroupLimit = await checkGroupLimit(tab.windowId, tab.groupId === -1 ? -1 : tab.groupId);
         const wouldExceedWindowLimit = await wouldExceedLimit(tab.windowId);
@@ -353,25 +371,11 @@ async function handleTabRemoved(tabId, removeInfo) {
         // Remove from pending tabs if it was pending
         pendingTabs.delete(tabId);
         
-        // Update counts (only if window still exists)
+        // Recount from the window's remaining tabs (only if window still exists).
+        // A blind decrement would drift when the removed tab was one we blocked
+        // and never counted.
         if (!removeInfo.isWindowClosing) {
-            await updateTabCount(removeInfo.windowId, -1);
-            
-            // For group count, we need to find which group the tab was in
-            // This is tricky since the tab is already removed
-            // We'll update all group counts to be safe
-            try {
-                const tabs = await chrome.tabs.query({ windowId: removeInfo.windowId });
-                const windowGroups = {};
-                tabs.forEach(tab => {
-                    const groupId = tab.groupId === -1 ? -1 : tab.groupId;
-                    windowGroups[groupId] = (windowGroups[groupId] || 0) + 1;
-                });
-                groupCounts.set(removeInfo.windowId, windowGroups);
-            } catch (error) {
-                // Fallback: just decrement ungrouped count
-                updateGroupCount(removeInfo.windowId, -1, -1);
-            }
+            await syncWindowCounts(removeInfo.windowId);
         }
         
     } catch (error) {
@@ -406,7 +410,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         debugLog('Received message:', request);
 
         // Only accept messages from this extension's own pages
-        if (!isTrustedSender(sender)) {
+        if (!isTrustedSender(sender, { id: chrome.runtime.id, origin: chrome.runtime.getURL('') })) {
             console.warn('Rejected message from untrusted sender');
             sendResponse({ success: false, error: 'Untrusted sender' });
             return;
@@ -508,66 +512,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-// Validate message requests for security
-function validateMessageRequest(request) {
-    const { action, tabId, windowId, newTabId } = request;
-    
-    // Check action is valid
-    const validActions = ['tabSelected', 'cancelSelection', 'tabSelectedForReplacement', 'cancelReplacement', 'getGrandfatheredStatus', 'getSelectorState', 'clearSelectorState'];
-    if (!validActions.includes(action)) {
-        return { valid: false, error: 'Invalid action' };
-    }
-    
-    // Validate IDs are safe integers
-    if (tabId !== undefined && !Number.isSafeInteger(tabId)) {
-        return { valid: false, error: 'Invalid tab ID' };
-    }
-    
-    if (windowId !== undefined && !Number.isSafeInteger(windowId)) {
-        return { valid: false, error: 'Invalid window ID' };
-    }
-    
-    if (newTabId !== undefined && !Number.isSafeInteger(newTabId)) {
-        return { valid: false, error: 'Invalid new tab ID' };
-    }
-    
-    // Action-specific validation
-    if (action === 'tabSelected') {
-        if (!tabId || !windowId || !newTabId) {
-            return { valid: false, error: 'Missing required fields for tabSelected' };
-        }
-    }
-    
-    if (action === 'cancelSelection') {
-        if (!newTabId || !windowId) {
-            return { valid: false, error: 'Missing required fields for cancelSelection' };
-        }
-    }
-    
-    if (action === 'tabSelectedForReplacement') {
-        if (!tabId || !windowId) {
-            return { valid: false, error: 'Missing required fields for tabSelectedForReplacement' };
-        }
-    }
-    
-    if (action === 'cancelReplacement') {
-        if (!windowId) {
-            return { valid: false, error: 'Missing required fields for cancelReplacement' };
-        }
-    }
-    
-    return { valid: true };
-}
-
-// Accept messages only from this extension's own pages (popup, selector, options)
-function isTrustedSender(sender) {
-    if (!sender || sender.id !== chrome.runtime.id) {
-        return false;
-    }
-    const extensionOrigin = chrome.runtime.getURL('');
-    return typeof sender.url === 'string' && sender.url.startsWith(extensionOrigin);
-}
-
 // Confirm a tab exists and belongs to the expected window before acting on it
 async function assertTabInWindow(tabId, windowId) {
     const tab = await chrome.tabs.get(tabId);
@@ -575,16 +519,6 @@ async function assertTabInWindow(tabId, windowId) {
         throw new Error('Tab does not belong to the expected window');
     }
     return tab;
-}
-
-// Only reopen URLs with safe schemes
-function isSafeReopenUrl(url) {
-    try {
-        const { protocol } = new URL(url);
-        return ['http:', 'https:', 'file:', 'chrome:', 'about:'].includes(protocol);
-    } catch {
-        return false;
-    }
 }
 
 // Handle tab selection from selector window

@@ -1,0 +1,12 @@
+{
+  "name": "chrome-tab-limiter-dev",
+  "private": true,
+  "description": "Development tooling for the Tab Limiter extension (not shipped; the extension lives in chrome-tab-limiter/).",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

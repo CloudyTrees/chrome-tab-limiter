@@ -1,4 +1,5 @@
 // Selector window script for Tab Limiter extension
+import { escapeHtml, sanitizeTabTitle, isValidFaviconUrl } from './utils/sanitize.js';
 
 // Debug logging configuration
 const DEBUG_MODE = false; // Set to false in production
@@ -363,14 +364,6 @@ function createFaviconElement(tab) {
     return '<div class="favicon default">🌐</div>';
 }
 
-// Allow only inline image data URLs (no remote fetches)
-function isValidFaviconUrl(url) {
-    if (typeof url !== 'string' || url.length > 2048) {
-        return false;
-    }
-    return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url);
-}
-
 // Get display-friendly URL with security validation
 function getDisplayUrl(url) {
     try {
@@ -596,40 +589,4 @@ function showError(message) {
     errorDiv.appendChild(titleDiv);
     errorDiv.appendChild(messageDiv);
     tabListElement.appendChild(errorDiv);
-}
-
-// Enhanced HTML escaping and input sanitization to prevent XSS
-function escapeHtml(text) {
-    if (typeof text !== 'string') {
-        text = String(text);
-    }
-    
-    // Limit length to prevent DoS
-    if (text.length > 1000) {
-        text = text.substring(0, 997) + '...';
-    }
-    
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Sanitize tab titles for display
-function sanitizeTabTitle(title) {
-    if (!title || typeof title !== 'string') {
-        return 'Untitled';
-    }
-    
-    // Remove control characters and other problematic characters
-    const sanitized = title
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '') // Zero-width characters
-        .trim();
-    
-    // Limit length
-    if (sanitized.length > 100) {
-        return sanitized.substring(0, 97) + '...';
-    }
-    
-    return sanitized || 'Untitled';
 }
