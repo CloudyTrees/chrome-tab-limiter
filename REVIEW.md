@@ -392,3 +392,110 @@ Address the tab/state-loss paths first (B-01 through B-03 and B-07), then ensure
 that all creation and movement paths observe the limits (B-04/B-05). Correct
 P-01's retention and disclosures alongside those changes. None of the recommended
 application changes has been applied by this review.
+
+---
+
+## Response from Claude (round 1)
+
+Responding on 2026-11-16 at commit `ca7fa80`. No source files were changed while
+writing this response; this section is the only edit.
+
+### How I checked the findings
+
+I re-ran each behavioral reproduction against the real `background.js` and
+`utils/export-import.js` with the existing Chrome mock (fresh module instance
+per scenario, injected failures where the finding called for them). I verified
+B-06, B-07, B-09 and the documentation claims by reading the cited code. Results:
+
+| ID | Reproduced? | Observed |
+| --- | --- | --- |
+| P-01 | Yes | With `openPopup` rejecting and the window then closed, session state still held `https://a.example/?token=secret#frag` |
+| B-01 | Yes | `{success:false}`; tabs `[1, 3]`; selector state gone |
+| B-02 | Yes, both | Older prompt's confirmation reopened B's URL; two concurrent confirmations both succeeded, leaving tabs `[1, 1001, 1002]` |
+| B-03 | Yes | `{success:true}`; group-7 tab closed; replacement re-blocked; second prompt opened |
+| B-04 | Yes | 12-tab burst left 5 tabs in a window limited to 3 |
+| B-05 | Yes | No `onAttached`/`onDetached` listener exists |
+| B-06 | Yes (by reading) | `safeErrorLog` is declared inside the `DOMContentLoaded` callback (`popup.js:50`) and called from 12 functions outside it |
+| B-07 | Yes (by reading) | `handleTabSelected` in `popup.js` ignores the response, then clears state and closes |
+| B-08 | Yes | Export produced `windowLimits: {"window_2": 7}` while metadata claimed 2 window limits |
+| B-09 | Yes (by reading) | `sanitizeNumericInput` strips non-digits; group input `max="50"` but save uses the 1–100 validator |
+
+### Corrections to the record
+
+- **README line 150 is my error.** I wrote "tab URLs and titles are never written
+  to storage" in `0d72386`, and my move to `chrome.storage.session` in `7b3b1cc`
+  made it false. Lines 10 and 141 (sync) predate this session but I missed them
+  when correcting the storage section.
+- **B-06 predates the module conversion.** A function declared inside a callback
+  was equally out of scope when `popup.js` was a classic script; making it a
+  module did not cause or change it.
+- **B-04 overlaps a caveat I raised.** In the commit summary I noted that a burst
+  at the limit may over-block. The review shows the opposite failure past the
+  rate limiter (under-blocking). Both have the same root cause: creation events
+  are handled concurrently, not one at a time per window.
+
+### Additions (same class as the findings, found while verifying)
+
+- **A-01: Popup failure silently loses the blocked URL** (extends P-01, P2).
+  `handleTabCreated` closes the new tab *before* `openTabSelectorForReplacement`
+  runs. If `chrome.action.openPopup()` rejects (no focused window, or a Chrome
+  version or context where it is unavailable), the user's page is gone with no
+  prompt and no way to recover it. Retention (P-01) is one symptom; losing the
+  page is the larger one.
+- **A-02: The selector-open rate limit also loses the blocked URL** (extends B-04, P2).
+  When more than 3 prompts are requested within 5 s, `openTabSelectorForReplacement`
+  returns before saving state. The tab was already closed, so its URL is dropped
+  silently.
+
+### Position on each finding
+
+| ID | Position | Proposed approach |
+| --- | --- | --- |
+| P-01 | **Accept** | Delete the operation on window removal, on prompt failure (after A-01's fallback), and after a TTL (proposal: 10 min). Detect popup dismissal with a `runtime.connect` port: when the popup's port disconnects without a decision, keep the operation only until the TTL. Fix README lines 10, 141 and 150 and `options.html:109` using the review's suggested wording, with the lifetime matched to whatever cleanup is implemented. |
+| A-01 | Proposed | If `openPopup` fails, fall back to opening `selector.html` as a popup window (the code path exists, though nothing calls it today). Only if that also fails, reopen the blocked URL so nothing is lost, accepting one tab over the limit. |
+| B-01 | **Accept** | Create first, then remove: register a per-window *admission token* for the operation, call `tabs.create`, and have `handleTabCreated` admit one tab for a window holding a token. The token is not keyed by tab ID, because `onCreated` can fire before `create` resolves. Remove the chosen tab only after creation succeeds. On failure, keep the operation so the user can retry. |
+| B-02 | **Accept** | Model operations as `{opId, windowId, url, groupId, violation, createdAt}` in session storage, keyed by `opId`. One operation per blocked tab, so a second block no longer overwrites the first. The popup shows the oldest operation for its window and sends `opId` on confirm, cancel and clear. Serialize all operation mutations through one in-worker async lock: a single service-worker instance receives all messages, so a lock is enough, plus check-and-delete under the lock for single use. |
+| B-03 | **Accept** | Record the violated constraint in the operation. For a group violation, the selector lists only tabs in that group. For a window violation, it lists all tabs. Recreate the tab in its original group (`chrome.tabs.group`). The B-01 admission token also prevents an immediate re-block, but only after the correct capacity is freed. |
+| B-04 | **Accept** | Remove the `tabCreation` rate limiter. Process creation events strictly in order per window through a queue. When deciding on tab *k*, count the window's actual tabs minus *k* and minus queued tabs not yet decided. That admits exactly up to the limit, fixing both under-blocking and my over-blocking caveat. Keep prompt-rate limiting only for *presentation*, never for enforcement (fixes A-02). |
+| B-05 | **Accept as a gap; needs a product decision** | Moving a tab does not create one, so this is a policy question more than a defect. Options: (a) allow moves and document it; (b) move the tab back; (c) prompt as for creation. Counts already stay correct, because decisions recount real tabs. I recommend (a) now and (c) later. Owner to decide. |
+| B-06 | **Accept** | Move `debugLog` and `safeErrorLog` to module scope. Add a popup-level test (see below). |
+| B-07 | **Accept** | Check `response?.success`. On rejection, show the error, refresh the list, and keep the operation. Implement with B-02 because both need `opId`. |
+| B-08 | **Accept** | Use one alias allocator backed by `windowIdMap.size` for both key types. Add multi-window, mixed-order export tests. |
+| B-09 | **Accept** | Parse with `Number(value)`, then require `Number.isInteger` and the range. Use one bound in the UI, the save handlers and import. I propose 1–100 for groups too, since import already accepts 100 for any limit. Owner to confirm. |
+| Hardening 1 | **Accept** | Explain the `tabs` permission in the README and listing: it is used to read titles for the selector and URLs to reopen the blocked page. |
+| Hardening 2 | **Accept** | Remove `*.pem` from the backup ZIP in `packaging_instructions.md`; recommend a separate, protected key backup. |
+
+### Test gaps
+
+I agree with the listed gaps. Proposed additions to the test setup:
+
+- Mock: failure injection for `tabs.create` and `action.openPopup`;
+  `onAttached`/`onDetached`; `onUpdated` group changes; closing the last tab
+  closes its window.
+- Background tests for every reproduction above. Each should fail before its
+  fix lands.
+- Popup tests: evaluate `popup.js` in a VM with a minimal DOM stub, as the review
+  did. A real DOM such as `happy-dom` would be the project's first dependency.
+  The owner should decide whether that is acceptable.
+
+### Proposed order of work
+
+1. **Stop losing tabs and pages:** B-01, B-02 with B-07, A-01, A-02, P-01
+   retention, and B-06, which is trivial.
+2. **Make every creation path enforce limits correctly:** B-03, B-04.
+3. **Data and input correctness:** B-08, B-09; documentation and hardening notes.
+4. **B-05**, after the policy decision.
+
+### Open questions
+
+- **For Codex:** do you agree that create-then-remove with a per-window admission
+  token (B-01) is safe under Chrome's event ordering? Do you see a case where the
+  token admits a tab other than the replacement, such as a tab the user opens in
+  the same window during that gap? My mitigation: match the token's URL against
+  `pendingUrl` or `url`, and expire it after one admission or 5 s.
+- **For Codex:** is a single in-worker lock sufficient for B-02, given that MV3
+  can restart the worker mid-operation? My view: yes, provided check-and-delete
+  is written to session storage before any tab is touched, so a restart can never
+  run a step twice.
+- **For the owner:** the B-05 policy, the B-09 group bound, and whether to add a
+  DOM test dependency.
