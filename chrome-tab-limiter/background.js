@@ -193,14 +193,31 @@ async function wouldExceedLimit(windowId) {
     return currentCount >= effectiveLimit;
 }
 
-// Store selector state for popup access
-const selectorState = {
+// Selector state for popup access. Kept in chrome.storage.session so it
+// survives service-worker restarts while the popup is open; session storage
+// is in-memory only (never written to disk) and is cleared when the browser
+// exits.
+const SELECTOR_STATE_KEY = 'selectorState';
+const EMPTY_SELECTOR_STATE = Object.freeze({
     isActive: false,
     windowId: null,
     mode: null,
     newTabUrl: null,
     newTabId: null
-};
+});
+
+async function loadSelectorState() {
+    const result = await chrome.storage.session.get(SELECTOR_STATE_KEY);
+    return result[SELECTOR_STATE_KEY] || { ...EMPTY_SELECTOR_STATE };
+}
+
+async function saveSelectorState(state) {
+    await chrome.storage.session.set({ [SELECTOR_STATE_KEY]: state });
+}
+
+async function clearSelectorState() {
+    await chrome.storage.session.remove(SELECTOR_STATE_KEY);
+}
 
 // Open tab selector for replacement (when new tab was already removed)
 async function openTabSelectorForReplacement(windowId, newTabUrl) {
@@ -214,11 +231,13 @@ async function openTabSelectorForReplacement(windowId, newTabUrl) {
         debugLog(`LIMIT EXCEEDED: Setting up popup selector for window ${windowId} to replace: ${newTabUrl}`);
         
         // Store state for popup access
-        selectorState.isActive = true;
-        selectorState.windowId = windowId;
-        selectorState.mode = 'replace';
-        selectorState.newTabUrl = newTabUrl;
-        selectorState.newTabId = null;
+        await saveSelectorState({
+            isActive: true,
+            windowId: windowId,
+            mode: 'replace',
+            newTabUrl: newTabUrl,
+            newTabId: null
+        });
         
         // Open the extension popup
         await chrome.action.openPopup();
@@ -458,19 +477,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 break;
             
             case 'getSelectorState':
-                sendResponse({
-                    success: true,
-                    selectorState: selectorState
-                });
+                loadSelectorState()
+                    .then((selectorState) => sendResponse({ success: true, selectorState }))
+                    .catch((error) => {
+                        console.error('Error loading selector state:', error.name);
+                        sendResponse({ success: false, error: 'Failed to load selector state' });
+                    });
                 break;
-                
+
             case 'clearSelectorState':
-                selectorState.isActive = false;
-                selectorState.windowId = null;
-                selectorState.mode = null;
-                selectorState.newTabUrl = null;
-                selectorState.newTabId = null;
-                sendResponse({ success: true });
+                clearSelectorState()
+                    .then(() => sendResponse({ success: true }))
+                    .catch((error) => {
+                        console.error('Error clearing selector state:', error.name);
+                        sendResponse({ success: false, error: 'Failed to clear selector state' });
+                    });
                 break;
                 
             default:
@@ -634,6 +655,7 @@ async function handleTabSelectedForReplacement(selectedTabId, windowId) {
         debugLog('User selected tab to close for replacement');
 
         // Must match an active replacement prompt for this window
+        const selectorState = await loadSelectorState();
         if (!selectorState.isActive || selectorState.mode !== 'replace' ||
             selectorState.windowId !== windowId) {
             throw new Error('No active replacement selection for this window');
@@ -645,8 +667,7 @@ async function handleTabSelectedForReplacement(selectedTabId, windowId) {
         await assertTabInWindow(selectedTabId, windowId);
 
         // One-shot: consume the state so the action cannot be replayed
-        selectorState.isActive = false;
-        selectorState.newTabUrl = null;
+        await clearSelectorState();
 
         // Remove the selected tab
         await chrome.tabs.remove(selectedTabId);

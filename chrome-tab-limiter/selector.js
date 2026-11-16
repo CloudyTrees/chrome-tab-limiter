@@ -527,26 +527,30 @@ function handleKeyNavigation(event) {
             break;
             
         case 'Enter':
-        case ' ':
+        case ' ': {
+            // Let focused buttons (Confirm / Cancel) activate natively
+            if (event.target.matches('button')) {
+                break;
+            }
             event.preventDefault();
-            if (currentFocusIndex >= 0 && currentFocusIndex < tabItems.length) {
-                const radio = tabItems[currentFocusIndex].querySelector('input[type="radio"]');
+            if (currentFocusIndex < 0 || currentFocusIndex >= tabItems.length) {
+                break;
+            }
+            const radio = tabItems[currentFocusIndex].querySelector('input[type="radio"]');
+            const tabId = parseInt(radio.value, 10);
+            if (event.key === 'Enter' && selectedTabId === tabId) {
+                // Enter on the already-selected tab confirms the choice
+                handleConfirm();
+            } else {
                 radio.checked = true;
-                const tabId = parseInt(radio.value);
                 handleTabSelection(tabId, currentFocusIndex);
             }
             break;
-            
+        }
+
         case 'Escape':
             event.preventDefault();
             handleCancel();
-            break;
-            
-        case 'Enter':
-            if (event.target === confirmButton || (selectedTabId && !event.target.matches('input, button'))) {
-                event.preventDefault();
-                handleConfirm();
-            }
             break;
     }
 }

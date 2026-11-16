@@ -125,16 +125,10 @@ async function importSettings(importData, options = {}) {
             storageData.defaultTabLimit = importData.settings.defaultTabLimit;
         }
         
-        // Handle existing data based on options
-        if (!replaceExisting || mergeLimits) {
-            const existingData = await chrome.storage.local.get(null);
-            
-            if (mergeLimits) {
-                // Merge with existing data, imported data takes precedence
-                Object.assign(storageData, existingData);
-            }
-        }
-        
+        // When merging (or not replacing), existing keys are kept because
+        // chrome.storage.local.set() only writes the keys it is given;
+        // imported values overwrite matching existing keys.
+
         // Privacy Notice: Window and group-specific limits are not imported
         // to protect user privacy. Only the default limit is restored.
         // Users can manually reconfigure window/group-specific limits if needed.
