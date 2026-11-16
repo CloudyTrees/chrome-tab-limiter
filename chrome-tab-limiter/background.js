@@ -246,6 +246,9 @@ async function openTabSelector(windowId, newTabId) {
         
         debugLog(`LIMIT EXCEEDED: Opening tab selector for window ${windowId}`);
         
+        // Register the new tab as awaiting a selection decision
+        pendingTabs.add(newTabId);
+
         // Create selector popup window with simplified positioning
         const selectorUrl = chrome.runtime.getURL(`selector.html?windowId=${windowId}&newTabId=${newTabId}`);
         debugLog('Creating window with URL:', selectorUrl);
@@ -382,7 +385,14 @@ async function handleWindowRemoved(windowId) {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     try {
         debugLog('Received message:', request);
-        
+
+        // Only accept messages from this extension's own pages
+        if (!isTrustedSender(sender)) {
+            console.warn('Rejected message from untrusted sender');
+            sendResponse({ success: false, error: 'Untrusted sender' });
+            return;
+        }
+
         // Validate message structure
         if (!request || typeof request !== 'object') {
             console.warn('Invalid message format received');
@@ -418,7 +428,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 break;
             
             case 'tabSelectedForReplacement':
-                handleTabSelectedForReplacement(request.tabId, request.windowId, request.newTabUrl)
+                // The URL to reopen comes from the background's own state,
+                // never from the message, so a page cannot make us open
+                // arbitrary URLs.
+                handleTabSelectedForReplacement(request.tabId, request.windowId)
                     .then(() => sendResponse({ success: true }))
                     .catch((error) => {
                         console.error('Error handling replacement tab selection:', error.name);
@@ -511,7 +524,7 @@ function validateMessageRequest(request) {
     }
     
     if (action === 'tabSelectedForReplacement') {
-        if (!tabId || !windowId || !request.newTabUrl) {
+        if (!tabId || !windowId) {
             return { valid: false, error: 'Missing required fields for tabSelectedForReplacement' };
         }
     }
@@ -525,11 +538,47 @@ function validateMessageRequest(request) {
     return { valid: true };
 }
 
+// Accept messages only from this extension's own pages (popup, selector, options)
+function isTrustedSender(sender) {
+    if (!sender || sender.id !== chrome.runtime.id) {
+        return false;
+    }
+    const extensionOrigin = chrome.runtime.getURL('');
+    return typeof sender.url === 'string' && sender.url.startsWith(extensionOrigin);
+}
+
+// Confirm a tab exists and belongs to the expected window before acting on it
+async function assertTabInWindow(tabId, windowId) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.windowId !== windowId) {
+        throw new Error('Tab does not belong to the expected window');
+    }
+    return tab;
+}
+
+// Only reopen URLs with safe schemes
+function isSafeReopenUrl(url) {
+    try {
+        const { protocol } = new URL(url);
+        return ['http:', 'https:', 'file:', 'chrome:', 'about:'].includes(protocol);
+    } catch {
+        return false;
+    }
+}
+
 // Handle tab selection from selector window
 async function handleTabSelected(selectedTabId, windowId, newTabId) {
+    // Validate before the try block so a bad request never reaches the
+    // fallback below, which closes newTabId.
+    if (!pendingTabs.has(newTabId)) {
+        throw new Error('No pending selection for this tab');
+    }
+    await assertTabInWindow(selectedTabId, windowId);
+    await assertTabInWindow(newTabId, windowId);
+
     try {
         debugLog('User selected tab to close');
-        
+
         // Remove the selected tab
         await chrome.tabs.remove(selectedTabId);
         debugLog('Closed selected tab');
@@ -556,6 +605,11 @@ async function handleTabSelected(selectedTabId, windowId, newTabId) {
 
 // Handle cancel selection from selector window
 async function handleCancelSelection(newTabId, windowId) {
+    if (!pendingTabs.has(newTabId)) {
+        throw new Error('No pending selection for this tab');
+    }
+    await assertTabInWindow(newTabId, windowId);
+
     try {
         debugLog('User canceled, removing new tab');
         
@@ -575,10 +629,25 @@ async function handleCancelSelection(newTabId, windowId) {
 }
 
 // Handle tab selection for replacement from selector window
-async function handleTabSelectedForReplacement(selectedTabId, windowId, newTabUrl) {
+async function handleTabSelectedForReplacement(selectedTabId, windowId) {
     try {
         debugLog('User selected tab to close for replacement');
-        
+
+        // Must match an active replacement prompt for this window
+        if (!selectorState.isActive || selectorState.mode !== 'replace' ||
+            selectorState.windowId !== windowId) {
+            throw new Error('No active replacement selection for this window');
+        }
+        const newTabUrl = selectorState.newTabUrl;
+        if (!isSafeReopenUrl(newTabUrl)) {
+            throw new Error('Refusing to reopen URL with unsafe scheme');
+        }
+        await assertTabInWindow(selectedTabId, windowId);
+
+        // One-shot: consume the state so the action cannot be replayed
+        selectorState.isActive = false;
+        selectorState.newTabUrl = null;
+
         // Remove the selected tab
         await chrome.tabs.remove(selectedTabId);
         debugLog('Closed selected tab for replacement');
