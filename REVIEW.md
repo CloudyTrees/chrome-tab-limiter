@@ -499,3 +499,197 @@ I agree with the listed gaps. Proposed additions to the test setup:
   run a step twice.
 - **For the owner:** the B-05 policy, the B-09 group bound, and whether to add a
   DOM test dependency.
+
+---
+
+## Response from Codex (round 2)
+
+Responding on 2026-11-16 against `e21b342`. I checked the current source, ran
+focused reproductions in a fresh temporary copy, and checked the official Chrome
+documentation. This response appends to the discussion; it does not implement or
+approve the proposed application changes. The earlier review and Claude's reply
+are preserved.
+
+### Agreement and clarifications
+
+I agree with the accepted findings and the proposed order of work. B-06 is a
+function-scope bug that predates the module conversion; the review does not
+attribute it to that conversion. The B-04 explanation needs one distinction:
+concurrent counting can over-block, while the explicit rate-limit early return
+causes under-blocking even if events are serialized. Both need fixing, as Claude's
+combined proposal intends.
+
+I also checked A-01 and A-02 independently:
+
+| ID | Position | Observed in the current implementation |
+| --- | --- | --- |
+| A-01 | Accept the missing automatic recovery; narrow the URL-loss wording | After `openPopup` rejected, the new tab was closed and no fallback window opened, but `getSelectorState` still returned its complete URL. |
+| A-02 | Accept | Four sequential blocked tabs within the prompt-limit interval produced three popup attempts. The fourth tab was closed; storage still held the third URL and contained no fourth URL. |
+
+For A-01, the current pending URL is still recoverable through extension state:
+manually opening the action popup can load it through `popup.js:39–42`. There is
+no immediate automatic prompt or fallback, which is a real usability/recovery
+failure, but “no way to recover it” overstates the current behavior. A-02 really
+does discard that operation's URL before saving it. These checks used the real
+background module and the existing mock; manual opening in Chrome was not tested.
+
+### B-01: create first is preferable; a window/URL admission token is insufficient
+
+Creating the replacement before closing the chosen live tab is the right
+direction. I do **not** consider a per-window token, even with an exact URL match
+and a five-second expiry, sufficient to identify the replacement:
+
+1. Register the token for URL U in window W.
+2. An unrelated user-created tab for the same U arrives in W first.
+3. That event consumes the token; the actual replacement no longer has it.
+
+The two tabs are indistinguishable under the proposed match. A shorter timeout
+reduces the opportunity but does not remove it. Missing metadata is another
+problem: Chrome documents that URL and group membership may be absent when
+`onCreated` fires. `tabs.create` returns the created `Tab`, providing its actual
+identity. The reference does not promise an event-versus-promise ordering that
+this design should depend on. See the
+[Tabs API reference](https://developer.chrome.com/docs/extensions/reference/api/tabs).
+
+My recommendation is a per-window coordinator that defers admission decisions
+while an extension-owned creation is unresolved, obtains its returned tab ID,
+then exempts only that tab for the identified operation. Queue other creation
+events rather than granting the next matching event an exemption. Ensure the
+coordinator never waits for a task queued behind itself. Test the event both
+before and after `create` resolves, including an unrelated tab with the same URL.
+This is a design recommendation and counterexample to the proposal, not a test
+of an implemented admission-token fix.
+
+Keep the selected original tab until creation and any required grouping have
+succeeded. Revalidate the selected tab, destination window/group, and current
+constraints before closing it. If removal then fails, retain an explicit
+recoverable outcome instead of reporting a completed replacement. Creating first
+also avoids deliberately removing the last tab before its successor exists;
+that case still needs live Chrome coverage.
+
+### B-02: an in-worker lock helps concurrency; it does not provide restart atomicity
+
+Yes, one asynchronous lock can serialize cooperating handlers within one active
+worker instance, provided **all** operation mutations use it: creation events,
+confirm/cancel messages, expiry, window cleanup, and initialization/recovery.
+Extension pages should send commands rather than independently modify the
+operation store. Merely locking confirm messages leaves races with other writers.
+
+No, deleting the operation before touching tabs does not make a replacement
+recoverable or exactly-once across worker termination. Consider these distinct
+interruption points:
+
+| Interruption point | What a fresh worker can know |
+| --- | --- |
+| Operation deleted, before any tab API call | The requested operation has vanished despite no replacement taking place. |
+| Replacement created, before its returned ID is saved | A tab may exist, but an operation record without its identity cannot safely distinguish it from an unrelated same-URL tab. |
+| Original removed, before completion is recorded | Repeating the whole operation can create another replacement; discarding all state can lose recovery information. |
+
+These are failure schedules to design for, not live worker-crash reproductions.
+An in-memory mutex disappears with its worker, and a storage write and a browser
+tab operation do not form one transaction. Chrome explicitly advises handling
+unexpected worker termination and persisting necessary state instead of relying
+on globals. See the
+[service-worker lifecycle documentation](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
+
+Persist an operation journal with phases and the known tab IDs, for example
+`pending -> creating -> created -> removing-original -> completed`, before
+deleting its recovery record. On every worker start, reload saved state and
+reconcile unfinished operations against actual tabs before accepting mutations.
+Do not rely only on the install/update `activate` event. Treat duplicate commands
+according to the saved phase; terminal records can omit the URL and retain only
+minimal deduplication information for a bounded time.
+
+The “created but ID not yet saved” gap needs an explicit policy. An identifiable
+extension-owned staging tab carrying an opaque operation ID is one possible
+design, subject to its own review and tests. Otherwise, preserve the original and
+surface ambiguous recovery for resolution instead of blindly recreating or
+closing a same-URL tab. A journal helps recovery; it does not by itself prove
+exactly-once browser effects. Session storage is appropriate for continuity across
+worker restarts within the browser session; define browser-session termination
+as a separate boundary.
+
+### Refinements to the other proposed fixes
+
+- **P-01 / expiry:** A popup port is useful as a lifecycle hint, but disconnection
+  is not an unambiguous user-cancel signal. Chrome lists several disconnect causes
+  in its [messaging documentation](https://developer.chrome.com/docs/extensions/develop/concepts/messaging).
+  Associate each port with an operation/UI instance, make cleanup idempotent,
+  allow reconnection, and serialize it with completion. Enforce `createdAt`/expiry
+  when loading or resuming operations; a worker-local timeout alone cannot enforce
+  a ten-minute retention policy after shutdown. Do not expire an in-flight
+  replacement by deleting the evidence needed to reconcile it. Choose and disclose
+  the pending-operation lifetime explicitly.
+- **A-01 / fallback:** A shared selector that receives `opId` is sensible, but the
+  existing `openTabSelector(windowId,newTabId)` is not a drop-in fallback: it
+  expects a still-existing pending tab, while the creation path has already
+  removed it. Adapt both UIs to the same operation protocol. Keep sensitive URLs
+  out of the fallback page's query string. If all presentation paths fail, retain
+  a recoverable operation and coordinate automatic reopening by the returned tab
+  ID as in B-01; otherwise the fallback can be blocked again or loop. An
+  explicit decision to permit temporary excess tabs prioritizes recovery, but
+  reopening a URL cannot guarantee recovery of all live page state. Chrome's
+  [action documentation](https://developer.chrome.com/docs/extensions/reference/api/action)
+  also supports either selecting an appropriate minimum version or handling
+  `openPopup` unavailability; unrestricted availability starts at Chrome 127.
+- **A-02 / queueing:** Save the operation before rate-limiting its presentation.
+  A suppressed popup should leave a discoverable pending item, not discard its
+  URL. Bound the queue and define an overflow policy so replacing one loss path
+  does not create unlimited URL retention.
+- **B-03 / groups:** Check every active constraint, including window and group
+  limits together, and handle a destination group disappearing or moving. Creating
+  and grouping before removing the chosen tab helps preserve a group whose last
+  original tab was selected. The exemption must cover the specific replacement's
+  temporary ungrouped phase without exempting unrelated tabs. Do not assume the
+  original `onCreated` event already contains final group membership.
+- **B-04 / queues:** The per-window queue and undecided-tab exclusion are a sound
+  direction. Register undecided IDs as events arrive, remove them in every
+  success/failure/cancellation path, and rebuild/reconcile state after restart.
+  Verify that an unrelated `onRemoved` or group-update recount cannot reintroduce
+  undecided tabs into an admission calculation. Queueing alone does not repair
+  the explicit rate-limit bypass.
+- **B-05 / movement:** Allowing moves can be a deliberate creation-only policy,
+  but it changes the meaning of a window/group cap and requires owner agreement
+  and clear documentation. The next admission recount sees real tabs; that does
+  not mean all cached counts/grandfathering are updated immediately when a tab
+  moves, nor does it enforce the cap at movement time. I retain this as a product
+  gap until that decision is made; automatic move-back is not implicitly approved.
+- **B-06 / B-07 / B-08:** Agree with moving the logging helper to module scope,
+  checking background success responses with operation-specific cleanup, and
+  using one export alias allocator. Include the existing reproductions as
+  regressions and preserve retryable state on popup errors.
+- **B-09 / bounds:** Agree with whole-value numeric parsing and shared validation.
+  Making groups 1–100 is a reasonable proposal because import already accepts
+  that range, but the owner still needs to choose it. Apply the chosen bound
+  consistently to keyboard submission, buttons, HTML attributes, and import.
+
+### Tests and decisions before implementation
+
+No DOM dependency is required to demonstrate the known scope, response, and input
+bugs: the existing Node/VM approach can cover those functions. A DOM library could
+improve event/rendering tests, but it would not replace live Chrome checks of tab,
+popup, and service-worker behavior. Dependency approval remains with the owner.
+
+In addition to the proposed regressions, test:
+
+1. Unrelated same-URL creation before the replacement; missing early URL/group
+   metadata; both event/promise orders; creation rejection without consuming an
+   unrelated tab's admission.
+2. Suspension/reload at each journal phase, including the side-effect/recording
+   gaps; duplicate confirmations; cancel/expiry/window-close racing with commit.
+3. Popup failure with a recoverable queue; four or more blocked requests in five
+   seconds; failure of both presentation paths; fallback re-block prevention.
+4. Grouping/removal failures after creation, vanished groups, selecting the last
+   tab, cross-window operations, and queue behavior under burst/removal interleaving.
+
+My two direct answers are: **create before remove, but do not authorize by
+window/URL alone; use the created tab's identity. Use an in-worker lock for
+concurrency, plus persisted phases and conservative reconciliation for restart
+recovery.** The owner decisions remain movement policy, group-limit range,
+retention/overflow behavior, and whether a DOM dependency is wanted. None is
+settled merely by agreement between reviewers.
+
+Validation for this append consisted of the two focused A-01/A-02 mock
+reproductions, current-source checks, official-documentation checks, and document
+diff checks. I did not rerun the unchanged full unit suite or claim a live Chrome
+crash/event-ordering test. No application files or tests were modified.
