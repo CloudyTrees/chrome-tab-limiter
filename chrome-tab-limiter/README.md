@@ -131,9 +131,11 @@ Settings are stored in Chrome's sync storage:
 
 This extension:
 - Works entirely locally on your machine
-- Does not collect or transmit any data
-- Only accesses tab information to enforce limits
-- Stores settings in Chrome's sync storage (encrypted by Google)
+- Does not collect or transmit any data — the content security policy sets `connect-src 'none'`, so extension pages cannot make network requests, and there is no analytics or telemetry
+- Only accesses tab information (titles, favicons, counts) to enforce limits and show the tab selector; tab URLs and titles are never written to storage
+- Stores only your tab-limit settings, in `chrome.storage.local` (not synced to your Google account)
+- Requests no host, history, cookie, or web-request permissions and injects no content scripts
+- Exports settings only when you ask, as a local JSON file with window/group IDs anonymized
 
 ## License
 

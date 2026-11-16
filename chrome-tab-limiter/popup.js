@@ -621,7 +621,7 @@ async function loadTabsForSelector(selectorState) {
             tabEl.innerHTML = `
                 <div class="tab-info">
                     <span class="tab-icon">📄</span>
-                    <span class="tab-title">${tab.title || 'Untitled'}</span>
+                    <span class="tab-title">${escapeHtml(tab.title || 'Untitled')}</span>
                 </div>
             `;
             
@@ -650,7 +650,7 @@ function showConfirmation(tab, selectorState) {
         <div class="selected-tab">
             <div class="tab-info">
                 <span class="tab-icon">📄</span>
-                <span class="tab-title">${tab.title || 'Untitled'}</span>
+                <span class="tab-title">${escapeHtml(tab.title || 'Untitled')}</span>
             </div>
         </div>
         <div class="confirmation-actions">

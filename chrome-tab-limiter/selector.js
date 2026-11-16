@@ -349,67 +349,26 @@ function createTabItem(tab, index) {
     return tabItem;
 }
 
-// Create favicon element with fallback
+// Create favicon element. Only inline data:image favicons are rendered so the
+// extension never makes a network request to a third-party host; everything
+// else uses the default icon.
 function createFaviconElement(tab) {
     if (tab.favIconUrl && isValidFaviconUrl(tab.favIconUrl)) {
         const img = document.createElement('img');
         img.src = tab.favIconUrl;
         img.className = 'favicon';
-        img.alt = 'favicon';
-        
-        const fallback = document.createElement('div');
-        fallback.className = 'favicon default';
-        fallback.textContent = '🌐';
-        fallback.style.display = 'none';
-        
-        img.addEventListener('error', () => {
-            img.style.display = 'none';
-            fallback.style.display = 'block';
-        });
-        
-        const container = document.createElement('div');
-        container.appendChild(img);
-        container.appendChild(fallback);
-        return container.innerHTML;
-    } else {
-        // Use default icon
-        return '<div class="favicon default">🌐</div>';
+        img.alt = '';
+        return img.outerHTML;
     }
+    return '<div class="favicon default">🌐</div>';
 }
 
-// Validate favicon URLs to prevent malicious content
+// Allow only inline image data URLs (no remote fetches)
 function isValidFaviconUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        
-        // Only allow specific schemes
-        const allowedSchemes = ['http:', 'https:', 'data:', 'chrome://'];
-        if (!allowedSchemes.includes(urlObj.protocol)) {
-            return false;
-        }
-        
-        // Block chrome:// URLs except favicon
-        if (urlObj.protocol === 'chrome:' && !url.startsWith('chrome://favicon/')) {
-            return false;
-        }
-        
-        // For data URLs, only allow image types
-        if (urlObj.protocol === 'data:') {
-            const mimeMatch = url.match(/^data:([^;]+)/);
-            if (!mimeMatch || !mimeMatch[1].startsWith('image/')) {
-                return false;
-            }
-        }
-        
-        // Basic length check to prevent excessively long URLs
-        if (url.length > 2048) {
-            return false;
-        }
-        
-        return true;
-    } catch (error) {
+    if (typeof url !== 'string' || url.length > 2048) {
         return false;
     }
+    return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url);
 }
 
 // Get display-friendly URL with security validation
