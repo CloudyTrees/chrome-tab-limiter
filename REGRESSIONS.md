@@ -289,3 +289,168 @@ One side fix: the `onUpdated` listener was an `else if`, so an event carrying bo
   not every possible interleaving.
 
 Not pushed and not committed. Awaiting the owner's decision on committing.
+
+---
+
+## Codex verification of Claude's fixes (2026-11-17)
+
+Reviewed commit `34c136d63076aff9a64f7825b7dbbd8497229d74` on `sh-dev`.
+Source locations in this section refer to that revision. Claude's preceding
+response was committed in that revision; its statements about uncommitted work
+describe the earlier point when it was written.
+
+**Verdict: the original reproductions are fixed, but do not sign off yet.**
+The replacement cases for REG-03 passed, with no remaining failure found there.
+Four additional deterministic probes exposed gaps in REG-01, REG-02 and REG-04.
+
+### Verification performed
+
+- Confirmed the fix commit and a clean working tree.
+- Ran `node --test tests/`: **198 passed, 0 failed, 45 suites**, including
+  Claude's 16 new regression tests.
+- Independently checked the test sensitivity in a temporary copy: replacing
+  only `background.js` with the version from `f032dac` made **14 of the 16 new
+  tests fail**, with the two controls passing. The fixed source was then restored
+  in that copy.
+- Ran four additional probes against the fixed background module, using fresh
+  module instances, the existing Chrome mock and delayed API calls. All four
+  failed their expected-behavior assertions, as detailed below.
+- Verified that HEAD and the hashes of every tracked repository file were
+  unchanged after investigation. This subsequent update changes only this
+  document; it contains no application fixes or committed test changes.
+
+The probes use the shared reproduction setup above: window 1 starts with three
+ordinary tabs at limit 3, window 2 has one tab, startup mode is ended with
+`startEnforcing`, and the pending cap is 5. Events are drained after each setup
+creation. Each API wrapper is one-shot unless a particular invocation is named.
+
+### REG-01a — Moving out and back still permits automatic closure
+
+**Locations:** `chrome-tab-limiter/background.js:419–439,466–471`;
+movement event callbacks at `922–929`.
+
+1. Open five pending tabs in window 1, bringing it to eight tabs.
+2. Open a sixth new tab in that window.
+3. While its creation handler awaits `storage.local.get`, move that new tab
+   from window 1 to window 2 and then back to window 1 using `harness.moveTab`.
+4. Call `flush(1)` before returning from the wrapper, so both moves' events are
+   delivered before the admission decision. Then let the queue drain.
+
+**Observed:** The moved tab is automatically closed. The probe recorded its ID
+in `removeAttempts`, and the tab was absent from window 1 afterward.
+
+**Expected:** Returning to a full window is still a move. The approved moved-tab
+rule protects this tab from automatic rejection and requires it to be reviewed
+as moved.
+
+The re-reads compare the tab's current window and group with snapshots. They do
+not record that movement occurred in between. The queued movement handlers run
+too late to protect it. This is distinct from the final API-round-trip window
+Claude acknowledged: all movement events in this probe arrive before the
+admission decision.
+
+**Fix direction:** Note movement synchronously as events arrive and invalidate
+the in-flight admission when it has moved, even if its final membership matches
+the initial snapshot. Reconcile it through the moved-tab path.
+
+### REG-04a — A limit raised during admission is still ignored
+
+**Locations:** `chrome-tab-limiter/background.js:419–444,466–471`;
+queued settings-change handling at `955–959`.
+
+1. Open five pending tabs in window 1, bringing it to eight tabs.
+2. Open the next new tab. Wrap `tabs.get` for that ID, counting its calls.
+3. On the second call, after settings have already been read but before the
+   fresh admission lookup returns, set `defaultTabLimit: 100`.
+4. Await `flush(1)` so the settings-change event arrives, then return the actual
+   tab lookup and let the queue drain.
+
+**Observed:** The new tab is closed, leaving eight tabs even though the stored
+limit is 100 before the admission decision.
+
+**Expected:** The tab fits the updated limits and should remain open, bringing
+the count to nine.
+
+The new reconciliation uses the `local` snapshot loaded at the start of the
+task. The settings handler queues behind that task, so an update heard during
+its awaits cannot stop a rejection based on obsolete limits. Raising the limit
+before the task starts is fixed; raising it during admission remains uncovered.
+
+**Fix direction:** Invalidate or restart admission when relevant settings change
+during its awaits. Re-read and reconcile the current settings before acting on
+a rejection, with an event counter or equivalent check to detect intervening
+changes.
+
+### REG-04b — A settings change that leaves excess does not refresh the popup
+
+**Locations:** `chrome-tab-limiter/background.js:624–631`;
+`chrome-tab-limiter/popup.js:588–595`.
+
+1. Open five pending tabs in window 1, bringing it to eight tabs.
+2. Capture the operation with `getState` and connect a popup port.
+3. Raise `defaultTabLimit` from 3 to 4 and drain the events.
+4. Compare the pushed revision with the old view, then query the new state.
+
+**Observed:** The excess changes from five to four, but both the old and new
+operation revisions remain 6. The push also carries revision 6 and the unchanged
+startup mode. The popup's push handler ignores that combination, leaving its
+displayed constraints and selection stale. The background badge does update.
+
+**Expected:** A settings change that alters displayed constraints must refresh
+the popup and invalidate selections based on the previous constraints.
+
+`handleSettingsChanged` reconciles and publishes, but does not bump the revision
+when an existing operation remains open. The added popup test covers a limit
+increase that removes the operation, where the revision changes to `null`; it
+does not cover an operation whose excess changes while it remains open.
+
+**Fix direction:** Advance the affected operation's revision when relevant
+settings change its displayed constraints or decision behavior, and publish the
+updated revision so the popup refreshes and clears its selection.
+
+### REG-02a — Navigation of an unselected tab does not invalidate an active command
+
+**Locations:** `chrome-tab-limiter/background.js:673–701,711–713,931–935`.
+The approved R3 rule is in `REVIEW.md`'s consolidated plan, section 3.
+
+1. Open one pending tab in window 1 and capture its operation and revision.
+2. Send `closeSelected`, selecting ordinary tab 1.
+3. During that command's `storage.local.get`, navigate ordinary tab 2 to a new
+   synthetic URL and call `flush(1)` so its URL event arrives before the command
+   continues.
+4. Let the command and queued events complete.
+
+**Observed:** The command returns `{success:true}` and closes tab 1.
+
+**Expected under R3:** A URL change on any tab in the window with an operation
+invalidates the selection, because every tab is selectable. The command should
+require review again.
+
+The new synchronous navigation counter protects chosen tabs, fixing the original
+REG-02 reproduction. However, both early and per-removal checks consult only
+the selected targets. A navigation of another tab in the same operation is
+applied to its revision only after the close command finishes. This finding is
+about the broader approved invalidation rule; it does not demonstrate closure
+of a newly navigated selected page, which the original fix now protects.
+
+**Fix direction:** Track navigation invalidation for the window or operation,
+not solely the closure targets, and recheck it across asynchronous boundaries.
+Continue storing counters or revisions rather than URLs. Navigation in a
+different window should not invalidate this operation.
+
+### Acceptance and limits of this verification
+
+Add coverage for these four follow-up cases and address them before sign-off.
+The original cases and the 198-test suite passing are evidence that the fixes
+work for their covered sequences; they do not establish that the four findings
+are completely resolved across the event sequences above.
+
+All four follow-up results are deterministic mock reproductions, **not live
+Chrome reproductions**. Codex did not independently repeat Claude's live Chrome
+experiments. The earlier limitations concerning emulated session restoration and
+extension reload remain in effect. This review does not require detecting form
+edits or other content changes that produce no URL event, and does not claim
+that asynchronous Chrome APIs can provide an atomic check-and-close operation.
+
+No source fixes, test changes, push or merge are included in this documentation
+update.
