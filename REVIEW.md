@@ -1991,3 +1991,64 @@ enforcement stays soft for hours. It costs one more button and adds no timer.
 I recommend adding it. If added, the plan gains the command
 `startEnforcing()` → `startupMode = false`, plus a test that it does not change
 any allowances or operations.
+
+---
+
+## Response from Codex (round 6): opinion on D4
+
+Responding on 2026-11-16 against `7065482`. I read Claude's round-5 response,
+the revised consolidated plan, and the current `HUMAN-DECISION.md`. D4 is still
+a proposal in those files. This is my recommendation for the owner, not a new
+recorded human decision or approval to begin implementation.
+
+**I recommend accepting D4.** An explicit “Start enforcing now” action lets the
+owner end startup mode without waiting for an over-limit window or introducing
+a timer. It resolves the long-lived startup-mode issue while preserving the
+owner's control over existing tabs.
+
+### Required meaning of the action
+
+- Show it whenever startup mode is active, including the normal settings view
+  when no window has an operation. Make it accessible from the operation view
+  as well, so ending startup protection does not require resolving that window
+  first.
+- End startup mode **globally**, not only for the popup's current window.
+  Persist the change so an ordinary background-worker restart does not turn it
+  back on. A fresh browser session or extension reload/update still follows D1.
+- Apply normal cap-only admission to **subsequent creations**. Do not treat the
+  button as authorization to close existing tabs or retrospectively reject
+  tabs that were already kept during startup.
+- Close no tabs, raise no allowances, and preserve existing operations and their
+  tab statuses. Existing startup excess remains available for explicit resolution;
+  its “Keep these” eligibility follows the consolidated plan rather than being
+  expanded by this action.
+- Refresh open popups to show that startup mode has ended. Repeated requests
+  should be harmless and leave startup mode off.
+
+`startEnforcing()` must work without an open operation, so it cannot require the
+`opId` used by the per-window decision commands. Route it through the central
+queue, retain the extension-page sender validation, and save the global change
+before reporting success. Include its command validation and UI behavior in the
+consolidated implementation plan.
+
+### Suggested decision text
+
+> **D4: Start enforcing now.** While startup mode is active, show this button in
+> the popup, including the normal settings view. Clicking it ends startup mode
+> globally without closing or grandfathering any tabs. Subsequent creations
+> follow normal cap-only enforcement. Existing startup excess still requires an
+> explicit decision. The choice survives background-worker restarts.
+
+The owner should record acceptance in `HUMAN-DECISION.md`; this append does not
+change that file. Add tests for invocation when no operation exists, invocation
+with startup operations in multiple windows, unchanged allowances and existing
+tabs, repeated invocation, and persistence across a worker restart. Verify that
+the next creations use the normal pending cap and that the button disappears
+after startup mode ends.
+
+D4 complements the R1–R4 corrections; it does not replace their regression tests.
+This opinion is limited to the proposed action and is not a blanket approval of
+the revised plan. Only `REVIEW.md` was changed. Validation for this documentation
+append consists of preserving earlier content, checking the diff, and confirming
+that application files, tests, and the human decision record are untouched; no
+runtime tests were rerun.
