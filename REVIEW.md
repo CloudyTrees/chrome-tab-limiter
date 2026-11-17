@@ -1583,7 +1583,8 @@ Chrome) are added to the test list and the live checklist respectively.
 
 ## Consolidated implementation plan (Claude, for owner approval)
 
-Written on 2026-11-16 after D1 was recorded in `HUMAN-DECISION.md`. This
+Written on 2026-11-16 after D1 was recorded in `HUMAN-DECISION.md`. **Revised in
+round 5** for Codex's corrections R1–R4; each change is marked with its tag. This
 section **replaces** the plan text in "Response from Claude (round 3)" and the
 corrections in round 4. Implementation should work from this section alone.
 `HUMAN-DECISION.md` remains authoritative wherever the two differ. No
@@ -1616,9 +1617,22 @@ For window W and each group G in W (ungrouped is `-1`):
 - `excess = real tab count − capacity`, per window and per group. W is **over**
   if any excess is greater than 0.
 - Tab statuses within W:
-  - `pending`: new; closable by the explicit bulk action.
-  - `moved`: protected.
+  - `pending`: arrived over a limit **after** startup mode ended; closable by
+    the explicit bulk action. Never eligible for "Keep these".
+  - `moved`: arrived by a move or group change into an over-limit destination;
+    protected. Never eligible for "Keep these".
+  - `startup`: arrived over a limit **while** startup mode was on, or was in an
+    over-limit window when the state was created (R2). Protected: never
+    rejected and never bulk-closed.
   - everything else is ordinary.
+- **Keep-eligible tabs** (R2) are every tab in W that is neither `pending` nor
+  `moved`. During startup mode a tab the user opens cannot be told apart from a
+  restored one, so both are `startup` and both are eligible; this is inherent to
+  D1. Because over-limit arrivals after startup mode ends always become
+  `pending` (or are rejected), tabs opened after startup mode ends are never
+  eligible. The one exception is a tab whose pending ID was lost when the worker
+  restarted before saving it (§7). It shows up as unexplained excess and is
+  eligible; "Keep these" is still an explicit user action.
 
   Titles and URLs are always read live and never stored.
 
@@ -1633,6 +1647,7 @@ For window W and each group G in W (ungrouped is `-1`):
       allowance: { window: number|null, groups: { [groupId]: number } },
       pending: [tabId],
       moved:   [tabId],
+      startup: [tabId],                 // R2
       op: null | {
         opId, revision,
         kind: 'startup' | 'normal',     // 'startup' if opened while startupMode was true
@@ -1648,7 +1663,10 @@ For window W and each group G in W (ungrouped is `-1`):
 An operation exists for W exactly while W is over. `revision` increases on any
 change affecting the prompt:
 - a tab is added, removed, moved, regrouped or replaced;
-- a pending or moved tab navigates (`onUpdated.url`); only the revision is stored;
+- **any** tab in W navigates (`onUpdated.url`) while W has an operation,
+  because every tab is selectable (R3). Only the revision is stored, never the
+  URL. Title-only changes do not bump the revision, because many pages update
+  their titles constantly;
 - a status changes.
 
 The in-memory `undecided` set of tab IDs is the only worker global the rules
@@ -1677,9 +1695,11 @@ before the task is queued, and every exit path removes it.
 **Creation of T in W.** Re-read T with `tabs.get` for its group. Count real
 tabs excluding T and other undecided tabs. Then, in this order:
 
-1. If `startupMode` is on and T doesn't fit: no pending status and no rejection.
-   T is ordinary excess. Open or keep a `startup` operation, bump `revision`,
-   present the prompt.
+1. **If `startupMode` is on, nothing is rejected and nothing becomes pending**
+   (R1). This rule takes precedence over every later one. If T fits every
+   constraint, T is admitted as ordinary, even if W has an open operation.
+   Otherwise T becomes `startup`, a `startup` operation opens or is kept, the
+   revision is bumped and the prompt is presented.
 2. If W has an open operation, T joins it as pending if
    `pending.length < cap`, otherwise it is rejected. This applies **even if T
    would fit**, because the open operation takes precedence (C1).
@@ -1690,8 +1710,8 @@ A rejection increments `rejectedCount`, saves, calls `tabs.remove(T)` and
 presents the prompt.
 
 **Removal.** Remove T from `pending`, `moved` and `closing`. Shrink the
-allowances. If W is no longer over, delete `op`, and any remaining pending or
-moved tabs become ordinary. Otherwise bump `revision`.
+allowances. If W is no longer over, delete `op`, and any remaining pending,
+moved or startup tabs become ordinary. Otherwise bump `revision`.
 
 **`onDetached(T, W1)` and `onAttached(T, W2)`.** Remove T's status in W1 and
 recompute W1, which may resolve its operation. In W2, if W2 or T's group is over,
@@ -1735,15 +1755,22 @@ cleanup.
 
     It then sets `phase = 'closing'` and records the selection, saves, and for
     each tab re-reads it and checks it is still in W and in the expected group
-    before calling `tabs.remove`. Finally it reconciles: the operation is
+    before calling `tabs.remove`. **Before each removal it also checks that W
+    would keep at least one tab**, and stops otherwise, because tabs can be
+    closed by hand while the command runs (R4). Finally it reconciles: the operation is
     resolved, or reopens with a new revision. A `closing` phase is **never
     replayed**.
   - `closePending()` is "Close these *k* new tabs", listing them by live title.
-    It closes only the current `pending` IDs, never moved ones.
+    It closes only the current `pending` IDs, never moved or startup ones. **It
+    is refused if W has no tab outside `pending`** (R4). In that case the popup
+    hides the button and shows "Closing these would close the window; choose
+    tabs instead". The same per-removal check applies as for `closeSelected`.
+  - **Invariant (R4):** no command ever closes the last tab in W.
   - `keepThese()` is available **only when `kind` is `startup`**. It sets
-    `allowance(W)` and each over group's allowance to the current count
-    **excluding pending and moved tabs**, so that new tabs opened after startup
-    are not grandfathered.
+    `allowance(W)`, and each over group's allowance, to that scope's count of
+    **Keep-eligible tabs** (§2, R2). It then clears `startup`. Pending and moved
+    tabs are left as they are, so the operation stays open if they still exceed
+    a limit.
   - "Decide later" closes the popup and sends no command.
 - Any successful `closeSelected`, `closePending` or `keepThese`, in any window,
   sets `startupMode = false`. That is the user's first decision.
@@ -1754,7 +1781,8 @@ cleanup.
 
 - **`tl_state` missing** (browser start, extension install, reload or update):
   create the state with `startupMode: true`. Each window currently over its
-  limit gets a `startup` operation. No allowances are set automatically; the
+  limit gets a `startup` operation, and all of its tabs are marked `startup`
+  (R2). No allowances are set automatically; the
   user's "Keep these" sets them. Pending state from before an extension reload is
   lost, and those tabs become startup excess, so nothing is closed.
 - **`tl_state` present** (worker restart): reconcile **without changing
@@ -1777,7 +1805,11 @@ cleanup.
 
 - Until the user's first decision after a browser start, limits are not
   enforced by rejection. If no window goes over, startup mode can stay on until
-  later in the day; the first over-limit event then offers "Keep these".
+  later in the day; the first over-limit event then offers "Keep these". (D4
+  below proposes an optional "Start enforcing now" action.)
+- Tabs the user opens during startup mode cannot be told apart from restored
+  tabs, so "Keep these" can grandfather them (R2). Tabs opened after startup
+  mode ends never can be, apart from the restart edge case in §2.
 - An operation opened in startup mode keeps offering "Keep these" until it is
   resolved, even after startup mode ends elsewhere.
 - Rejected tabs may already have started loading.
@@ -1822,7 +1854,8 @@ Regression groups:
    - C1: an operation opened by group A, then a new tab in group B, below and at
      the cap.
 2. **Movement and staleness:**
-   - a pending tab navigating invalidates the selection;
+   - any selectable tab navigating invalidates the selection, whether
+     pending, moved, startup or ordinary (R3), and a title-only change does not;
    - manual closure, or the constraint being resolved before confirmation;
    - moves between windows and groups, including into a window at the cap;
    - C2: pending to moved through a group change and through a window move;
@@ -1839,8 +1872,12 @@ Regression groups:
    - C3: the 10/12/13 allowance example.
 4. **Startup (D1):**
    - creation events around initialization;
-   - startup excess is never rejected;
-   - `keepThese` excludes pending and moved tabs;
+   - startup excess is never rejected, **including a tab that fits its own
+     group while another group's startup operation is open, both below and
+     above the cap** (R1);
+   - `keepThese` counts exactly the Keep-eligible tabs: ordinary and startup in,
+     pending and moved out, with a tab opened after startup mode ends staying
+     out (R2);
    - the first decision in one window ends startup mode everywhere;
    - steady creation during startup;
    - a worker restart during startup keeps the mode on;
@@ -1848,7 +1885,11 @@ Regression groups:
 5. **Constraints and remaining fixes:**
    - simultaneous window and group violations (`resolvesAll`);
    - a vanished group;
-   - refusing to close every tab in a window;
+   - refusing to close every tab in a window through `closeSelected` **and
+     `closePending`**, including Codex's example (limit 1, one ordinary and two
+     pending tabs, the ordinary tab closed by hand, then "Close these 2 new
+     tabs" is refused), and a last-moment manual closure during
+     `closeSelected` (R4);
    - cleanup when a window closes;
    - B-06 (popup in a VM with failing `tabs.query`), B-07, B-08 (Codex's key
      order), B-09 (`1.5`, `-5`, `1e2`, a group at 75).
@@ -1873,3 +1914,80 @@ Regression groups:
 6. **The live Chrome checklist.**
 
 Approval of this section by the owner is the gate for starting step 1.
+
+---
+
+## Review from Codex (round 5, relayed by the owner)
+
+Recorded verbatim from the owner's relay on 2026-11-16, reviewing `f22c82a`.
+
+> I reviewed the consolidated plan. I would request four corrections before
+> approving it as the implementation specification:
+>
+> 1. Startup mode can still automatically close tabs.
+>    Creation rules (REVIEW.md:1680) exempt a startup tab only when that tab does
+>    not fit. If group A is over capacity but a new tab fits group B, execution
+>    reaches the pending-cap branch. Eventually it rejects a tab while startupMode
+>    is still true—contradicting D1. Startup protection must take precedence over
+>    every automatic rejection path.
+> 2. “Keep these” can grandfather newly opened tabs.
+>    The same startup branch classifies new excess tabs as ordinary, rather than
+>    pending. “Keep these” (REVIEW.md:1743) excludes only pending and moved tabs,
+>    so those new ordinary tabs enter the allowance. CC’s consequence 1 is
+>    therefore not implemented by the written rules. The plan needs an explicit
+>    definition and representation of which startup tabs are eligible to be kept.
+> 3. Navigation protection excludes ordinary tabs that the user can select.
+>    Revision rules (REVIEW.md:1648) invalidate selections when pending or moved
+>    tabs navigate, but the picker also offers ordinary tabs. An ordinary selected
+>    tab could navigate without invalidating the selection; existence/window/group
+>    checks would still pass. Protect every selectable tab against this
+>    stale-selection case.
+> 4. The last-tab safeguard does not cover closePending.
+>    Commands (REVIEW.md:1731) prohibit closeSelected from closing the whole
+>    window, but give closePending no equivalent safeguard. Example: limit 1, one
+>    ordinary tab and two pending tabs; manually close the ordinary tab, then
+>    “Close these 2 new tabs” closes the entire window. Apply the safeguard
+>    consistently.
+>
+> These are contradictions in the proposed specification, not failures observed
+> in an implemented patch.
+>
+> Regarding CC’s three disclosed consequences:
+>
+> - Consequence 1: Sensible intent, but needs the correction above.
+> - Consequence 2: Real, but a timer is not the only solution. A “Start enforcing
+>   now” action in the normal popup could end startup mode even when no window is
+>   over its limit. That would be an additional product choice for you.
+> - Consequence 3: A reasonable deliberate policy, provided each window’s “Keep
+>   these” eligibility remains clearly bounded.
+>
+> The overall architecture remains sound. The small independent fixes are
+> unaffected, but the consolidated specification needs these corrections before
+> approval as a whole.
+
+---
+
+## Response from Claude (round 5)
+
+All four are real contradictions in my specification, and I have accepted them.
+The consolidated plan above is **edited in place**, with each change tagged R1–R4,
+so it remains the single specification. No application code has been changed.
+
+| # | Accepted fix (where in the consolidated plan) |
+| --- | --- |
+| R1 | §5 creation rule 1 now says that **in startup mode nothing is rejected and nothing becomes pending**, and it takes precedence over every later rule. A tab that fits is admitted even if an operation is open; one that doesn't fit becomes `startup`. Test: Codex's group-A/group-B case below and above the cap. |
+| R2 | §2 and §3 add an explicit `startup` status and list, and define **Keep-eligible = not `pending` and not `moved`**. Since over-limit arrivals after startup mode always become `pending` or are rejected, tabs opened after startup mode never qualify. **Correction to my consequence 1:** tabs the user opens *during* startup mode cannot be told apart from restored ones, so they are eligible. That is inherent to D1 and now disclosed in §8. The restart edge case (a pending ID lost before it was saved) is also stated: such a tab is eligible, but only through the explicit action. |
+| R3 | §3: a URL change on **any** tab in a window with an operation bumps the revision. Title-only changes deliberately do not, because many pages update their titles constantly and the selection would be invalidated nonstop. |
+| R4 | §6: a general invariant that **no command closes the last tab in W**. `closePending` is refused when W has no tab outside `pending`, and every removal is checked again just before it happens. Tests cover Codex's limit-1 example and a manual closure at the last moment. |
+
+On Codex's consequence notes: consequence 3 stays as a deliberate policy, with
+eligibility bounded per window by the R2 definition. Consequence 2 depends on a
+new owner decision:
+
+**D4 (owner): add a "Start enforcing now" action?** It would sit in the normal
+popup view and be shown only while startup mode is on. It ends startup mode
+immediately, even when no window is over its limit, which closes the gap where
+enforcement stays soft for hours. It costs one more button and adds no timer.
+I recommend adding it. If added, the plan gains the command
+`startEnforcing()` → `startupMode = false`, plus a test that it does not change
+any allowances or operations.
