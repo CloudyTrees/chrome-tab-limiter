@@ -55,64 +55,39 @@ This creates `<folder>.crx` and `<folder>.pem` next to the folder.
 
 ## Method 3: Install script (convenient)
 
-An install script only needs the extracted ZIP from Method 1.
+`tools/install.sh` (Mac/Linux) and `tools/install.bat` (Windows) unpack the ZIP
+from Method 1 for you. Copy one of them into the folder that holds the
+`tab-limiter-<version>.zip` and run it there. Keep exactly one ZIP in that folder.
 
-### `install.sh` (Mac/Linux), placed next to the ZIP
+What they do, and what they refuse to do:
+
+- They extract into a **fresh staging folder** and check that the manifest, the
+  background script and both pages are present. The installer for Mac/Linux also
+  refuses an archive that contains symbolic links.
+- Only then do they replace `tab-limiter-extension`. **If anything fails, the
+  existing installation is left exactly as it was**, nothing is reported as
+  installed, no browser is opened and the exit status is not zero.
+- The ZIP's file name is handled as data, never as part of a command, so a name
+  containing quotes, spaces, `;`, `$(...)` or `&` cannot run anything.
+
 ```bash
-#!/bin/bash
-echo "Installing Chrome Tab Limiter..."
-
-zip_file="$(ls tab-limiter-*.zip 2>/dev/null | head -n 1)"
-if [ -z "$zip_file" ]; then
-    echo "✗ No tab-limiter-*.zip found next to this script."
-    exit 1
-fi
-
-rm -rf tab-limiter-extension
-mkdir tab-limiter-extension
-unzip -q "$zip_file" -d tab-limiter-extension
-
-echo "✓ Extension extracted"
-echo ""
-echo "Next steps:"
-echo "1. Open Chrome and go to: chrome://extensions/"
-echo "2. Enable 'Developer mode'"
-echo "3. Click 'Load unpacked'"
-echo "4. Select this folder: $(pwd)/tab-limiter-extension"
-
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    open -a "Google Chrome" "chrome://extensions/"
-else
-    google-chrome "chrome://extensions/" &
-fi
+# Mac/Linux
+bash install.sh
 ```
 
-### `install.bat` (Windows), placed next to the ZIP
 ```batch
-@echo off
-echo Installing Chrome Tab Limiter...
-
-for %%f in (tab-limiter-*.zip) do set ZIPFILE=%%f
-if not defined ZIPFILE (
-    echo Error: no tab-limiter-*.zip found next to this script.
-    pause
-    exit /b 1
-)
-
-if exist tab-limiter-extension rmdir /s /q tab-limiter-extension
-powershell -command "Expand-Archive -Path '%ZIPFILE%' -DestinationPath 'tab-limiter-extension'"
-
-echo.
-echo Extension extracted. Next steps:
-echo 1. Chrome will open to the extensions page
-echo 2. Enable 'Developer mode' (top right)
-echo 3. Click 'Load unpacked'
-echo 4. Select folder: %cd%\tab-limiter-extension
-echo.
-pause
-
-start chrome "chrome://extensions/"
+:: Windows: double-click install.bat, or run it from a command prompt
+install.bat
 ```
+
+Then open `chrome://extensions/`, enable "Developer mode", click "Load unpacked"
+and select the `tab-limiter-extension` folder the script prints.
+
+**The Windows script has not been run on Windows.** `tests/installer.test.js` runs
+the Mac/Linux script for real, including corrupt archives and hostile file names,
+and holds the Windows script to the same rules by inspection. If you would rather
+not rely on it, extract the ZIP into a new folder with "Extract All..." and use
+"Load unpacked" on that folder.
 
 ---
 
@@ -137,12 +112,13 @@ files out of the repository, but it does not protect a plain `zip -r`.
 ## Quick distribution package
 
 ```bash
-tools/package.sh                      # builds dist/tab-limiter-<version>.zip
-cp dist/tab-limiter-*.zip tab-limiter-dist/   # plus install.sh or install.bat
+tools/package.sh                                  # builds dist/tab-limiter-<version>.zip
+mkdir tab-limiter-dist
+cp dist/tab-limiter-*.zip tools/install.sh tools/install.bat tab-limiter-dist/
 ```
 
-Put the ZIP and one install script in a new folder and archive that folder. It
-contains only what you placed there.
+Archive that new folder. It contains only what you copied into it; list it with
+`unzip -l` before you share it.
 
 ---
 

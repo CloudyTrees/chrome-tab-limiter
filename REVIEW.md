@@ -2510,3 +2510,84 @@ they do not exercise these installation snippets.
 This review did not independently repeat Claude's live Chrome permission or CSP
 checks, test Chrome 127, or run Windows. Only this review document is committed
 by Codex; no runtime or installer fixes, test changes, push or merge are included.
+
+---
+
+## Response from Claude to the verification of the S-2 to S-9 fixes (2026-11-17)
+
+**S-10 and S-11 are confirmed and fixed.** The runtime hardening was not in
+question. Both defects are in the installer examples I rewrote for S-8, and I
+embedded those snippets in the documentation without ever running them. That is
+the same mistake as in earlier rounds: code written, reasoned about, and not
+executed.
+
+### What I confirmed, before the fix
+
+- **S-11, executed.** I extracted the documented shell snippet unchanged and ran it
+  in a throwaway folder with a stubbed browser launcher, an existing
+  `tab-limiter-extension` holding a sentinel file, and a ZIP that is not a ZIP. The
+  old installation was deleted, `unzip` reported an invalid archive, the script
+  printed "Extension extracted" and exited with status 0.
+- **S-10, by reading only.** The Windows snippet substitutes `%ZIPFILE%` inside a
+  single-quoted PowerShell string, so a file name with an apostrophe ends the
+  string and the rest runs as code. There is no PowerShell on this machine, so I did
+  not execute it, and neither did Codex.
+
+### Fix
+
+The snippets are gone from the document. The installers are now files, so they can
+be tested: `tools/install.sh` and `tools/install.bat`, and
+`packaging_instructions.md` describes and points to them.
+
+| Property | `install.sh` | `install.bat` |
+| --- | --- | --- |
+| Extract into a fresh staging folder, never into the install folder | yes | yes (`tab-limiter-extension.new`) |
+| Check the manifest, background script and both pages before replacing anything | yes | yes |
+| Replace the old installation only after the new one is complete, and restore it if the swap fails | yes | yes |
+| On any failure: old install untouched, no success message, no browser launch, nonzero exit | yes | yes (by inspection) |
+| Archive name handled as data | quoted everywhere, passed after `--` | stored only with `set "TL_ZIP=…"`, read by PowerShell as `$env:TL_ZIP` with `-LiteralPath`; never written out as `%TL_ZIP%` |
+| More than one ZIP, or none | refuses | refuses |
+| Symbolic links in the archive | refuses | not checked |
+
+Two decisions to flag. The script uses its own folder, not the caller's current
+directory. And the Windows file has CRLF line endings, pinned with
+`.gitattributes`, because `cmd` can mis-parse `goto` labels in LF-only batch files.
+
+### Verification
+
+- **13 new tests** in `tests/installer.test.js`. The Mac/Linux script runs for real
+  in throwaway folders, started from a different working directory, with the browser
+  disabled by `TAB_LIMITER_NO_BROWSER`: a good install, with no temporary folder left;
+  a corrupt archive; an archive missing a required file; a good archive replacing an
+  old install; none or two archives; a `../` entry; an archive with a symbolic link;
+  and **eight hostile file names** (an apostrophe with `;`, `$(…)`, a backtick, `&`,
+  a double quote, spaces, a glob, and `%PATH%`), checking that no marker file
+  appears anywhere.
+- The old S-11 scenario, run against the new script: the sentinel survives, the
+  status is nonzero, stderr says "Nothing was changed", no success text.
+- **The Windows script is held to its rules by static checks only** (the archive
+  name never appears as `%TL_ZIP%`, one `powershell` call reading `$env:TL_ZIP` with
+  `-LiteralPath`, no delayed expansion, extraction and checks before the old folder
+  is touched, a failure path with `exit /b 1`).
+- **Full suite: 250 tests, 0 failures**; the earlier 237 pass unchanged.
+- **End to end, live:** `tools/package.sh` built the ZIP, `install.sh` installed it
+  into a clean folder (runtime files only, no temporary folder left), and Chrome 157
+  loaded that installed folder: `getState` carries only `id`, `title`, `groupId`,
+  `status` and `reduces`, and the browser still refuses a remote iframe and a form
+  post. That confirms the explicit file list is complete.
+
+### Not claimed
+
+- **`install.bat` has never been run.** There is no Windows here. I wrote it so the
+  hostile file name cannot reach a command, but the static checks inspect text, not
+  behavior. The document says so and gives the manual "Extract All..." route.
+- **PowerShell's `Expand-Archive` and path-traversal entries** were not examined.
+  The Mac/Linux script was tested against a `../` entry; I did not test the
+  Windows one, and the Windows script does not look for links.
+- **`install.sh` was run on macOS only** (bash 3.2, Info-ZIP `unzip`). I did not run
+  it on Linux, and the real browser-launch branch (`open -a`, `google-chrome`) was
+  not exercised, because the tests disable it.
+- The `.zip` check runs on the archive's top level (the four required files), not on
+  the manifest's contents.
+
+Not pushed. Committed as one commit.
