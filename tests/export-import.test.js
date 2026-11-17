@@ -89,6 +89,49 @@ describe('exportSettings', () => {
     });
 });
 
+describe('exportSettings alias allocation (B-08)', () => {
+    const SETTINGS = {
+        groupLimit_10_1: 4,
+        groupLimit_20_2: 5,
+        tabLimit_20: 6,
+        tabLimit_30: 7
+    };
+
+    const permutations = (items) =>
+        items.length <= 1
+            ? [items]
+            : items.flatMap((item, i) =>
+                  permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest])
+              );
+
+    it('keeps every custom setting and relationship for every key order', async () => {
+        for (const order of permutations(Object.keys(SETTINGS))) {
+            const local = harness.chrome.storage.local;
+            await local.clear();
+            for (const key of order) {
+                await local.set({ [key]: SETTINGS[key] });
+            }
+
+            const { settings, metadata } = await api.exportSettings();
+            const label = order.join(', ');
+
+            assert.deepEqual(Object.values(settings.windowLimits).sort(), [6, 7], `window limits lost: ${label}`);
+            assert.equal(metadata.totalWindows, 3, `window count: ${label}`);
+            assert.equal(metadata.totalCustomLimits, 4, label);
+
+            // Window 20's group limit must hang off the alias that holds window 20's limit (6)
+            const group20 = Object.entries(settings.groupLimits).find(([, v]) => v === 5);
+            const aliasOfGroup20 = group20[0].split('_').slice(1, 3).join('_');
+            assert.equal(settings.windowLimits[aliasOfGroup20], 6, `group 20 detached: ${label}`);
+
+            // Window 10 (group limit only) must not share an alias with a window that has a limit
+            const group10 = Object.entries(settings.groupLimits).find(([, v]) => v === 4);
+            const aliasOfGroup10 = group10[0].split('_').slice(1, 3).join('_');
+            assert.equal(aliasOfGroup10 in settings.windowLimits, false, `window 10 collided: ${label}`);
+        }
+    });
+});
+
 describe('importSettings', () => {
     it('replace mode (the default) clears existing settings first', async () => {
         await harness.chrome.storage.local.set({ defaultTabLimit: 3, tabLimit_1: 5 });

@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Tab Limiter",
   "version": "1.0.0",
+  "minimum_chrome_version": "127",
   "description": "Limit the number of open tabs per window. Requires tab access to count and manage tabs. All data stored locally only.",
   "permissions": [
     "tabs",

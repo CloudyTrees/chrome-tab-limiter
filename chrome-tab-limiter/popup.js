@@ -1,5 +1,6 @@
 // Popup script for Tab Limiter extension
 import { escapeHtml } from './utils/sanitize.js';
+import { parseLimitInput } from './utils/validation.js';
 
 // Debug logging configuration
 const DEBUG_MODE = false; // Set to false in production
@@ -7,6 +8,15 @@ const DEBUG_MODE = false; // Set to false in production
 function debugLog(...args) {
     if (DEBUG_MODE) {
         console.log('[Tab Limiter Popup]', ...args);
+    }
+}
+
+// Privacy-focused error handling - never log user data
+function safeErrorLog(message, error) {
+    if (DEBUG_MODE) {
+        console.error(message, error?.name || 'Unknown error');
+    } else {
+        console.error(message);
     }
 }
 
@@ -45,15 +55,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) {
         debugLog('Error checking selector state:', error);
     }
-
-// Privacy-focused error handling - never log user data
-function safeErrorLog(message, error) {
-    if (DEBUG_MODE) {
-        console.error(message, error?.name || 'Unknown error');
-    } else {
-        console.error(message);
-    }
-}
 
     // Get DOM elements
     currentTabCountElement = document.getElementById('currentTabCount');
@@ -281,31 +282,17 @@ async function checkFirstRun() {
     }
 }
 
-// Enhanced limit validation with input sanitization
-function validateLimit(limit) {
-    // Ensure it's a safe integer
-    if (!Number.isSafeInteger(limit)) {
-        return false;
-    }
+// Limits are whole numbers from 1 to 100, for windows and groups alike
+const MIN_LIMIT = 1;
+const MAX_LIMIT = 100;
 
-    // Check range
-    return limit >= 1 && limit <= 100;
+// Parse the whole input value. Never rewrite it (1.5 must not become 15).
+function sanitizeNumericInput(input) {
+    return parseLimitInput(input, MIN_LIMIT, MAX_LIMIT) ?? NaN;
 }
 
-// Sanitize numeric input to prevent injection
-function sanitizeNumericInput(input) {
-    if (typeof input !== 'string' && typeof input !== 'number') {
-        return NaN;
-    }
-
-    // Convert to string and remove any non-digit characters
-    const sanitized = String(input).replace(/[^\d]/g, '');
-
-    // Parse as integer
-    const num = parseInt(sanitized, 10);
-
-    // Return NaN for invalid inputs
-    return isNaN(num) ? NaN : num;
+function validateLimit(limit) {
+    return Number.isSafeInteger(limit) && limit >= MIN_LIMIT && limit <= MAX_LIMIT;
 }
 
 // Validate tab limit input
@@ -434,7 +421,7 @@ function createGroupItemHTML(groupId, title, color, count, limit) {
                 <div class="group-count">${count} tab${count !== 1 ? 's' : ''}</div>
             </div>
             <input type="number" class="group-limit-input" id="${inputId}"
-                   value="${limit}" min="1" max="50" data-group-id="${groupId}">
+                   value="${limit}" min="1" max="100" data-group-id="${groupId}">
             <button class="group-save-btn" data-group-id="${groupId}">Save</button>
         </div>
     `;
@@ -491,7 +478,7 @@ async function handleSaveGroupLimit(groupId) {
         const limit = sanitizeNumericInput(input.value);
 
         if (!validateLimit(limit)) {
-            showMessage('Please enter a valid limit (1-50)', 'error');
+            showMessage('Please enter a valid limit (1-100)', 'error');
             return;
         }
 
@@ -525,7 +512,7 @@ function validateGroupInput(groupId) {
     const button = document.querySelector(`[data-group-id="${groupId}"].group-save-btn`);
 
     const value = sanitizeNumericInput(input.value);
-    const isValid = validateLimit(value) && value <= 50; // Groups have lower max
+    const isValid = validateLimit(value);
 
     if (button) {
         button.disabled = !isValid;

@@ -42,13 +42,21 @@ async function exportSettings() {
             }
         };
         
-        let windowCount = 0;
         let groupCount = 0;
         let customLimitCount = 0;
         
         // Create anonymization maps for privacy protection
         const windowIdMap = new Map();
         const groupIdMap = new Map();
+
+        // One allocator per map, based only on the map's size, so aliases are
+        // unique no matter which storage keys are processed first.
+        const aliasFor = (map, realId, prefix) => {
+            if (!map.has(realId)) {
+                map.set(realId, `${prefix}_${map.size + 1}`);
+            }
+            return map.get(realId);
+        };
         
         // Process all storage keys with ID anonymization
         for (const [key, value] of Object.entries(allData)) {
@@ -56,14 +64,9 @@ async function exportSettings() {
                 // Window-specific tab limits - anonymize window ID
                 const realWindowId = key.replace('tabLimit_', '');
                 
-                // Create anonymized ID
-                if (!windowIdMap.has(realWindowId)) {
-                    windowIdMap.set(realWindowId, `window_${windowCount + 1}`);
-                }
-                const anonymizedWindowId = windowIdMap.get(realWindowId);
-                
+                const anonymizedWindowId = aliasFor(windowIdMap, realWindowId, 'window');
+
                 exportData.settings.windowLimits[anonymizedWindowId] = value;
-                windowCount++;
                 customLimitCount++;
             } else if (key.startsWith('groupLimit_')) {
                 // Group-specific tab limits - anonymize group ID
@@ -72,16 +75,7 @@ async function exportSettings() {
                     const realWindowId = parts[1];
                     const realGroupId = parts.slice(2).join('_');
                     
-                    // Create anonymized IDs
-                    if (!windowIdMap.has(realWindowId)) {
-                        windowIdMap.set(realWindowId, `window_${windowIdMap.size + 1}`);
-                    }
-                    
-                    if (!groupIdMap.has(realGroupId)) {
-                        groupIdMap.set(realGroupId, `group_${groupIdMap.size + 1}`);
-                    }
-                    
-                    const anonymizedKey = `groupLimit_${windowIdMap.get(realWindowId)}_${groupIdMap.get(realGroupId)}`;
+                    const anonymizedKey = `groupLimit_${aliasFor(windowIdMap, realWindowId, 'window')}_${aliasFor(groupIdMap, realGroupId, 'group')}`;
                     exportData.settings.groupLimits[anonymizedKey] = value;
                     groupCount++;
                     customLimitCount++;
@@ -90,7 +84,7 @@ async function exportSettings() {
         }
         
         // Update metadata
-        exportData.metadata.totalWindows = windowCount;
+        exportData.metadata.totalWindows = windowIdMap.size;
         exportData.metadata.totalGroups = groupCount;
         exportData.metadata.totalCustomLimits = customLimitCount;
         

@@ -73,3 +73,23 @@ export function validateMessageRequest(request) {
 
     return { valid: true };
 }
+
+// Parse a limit typed into a number field. The whole value must be a plain
+// decimal number (no hex, no stray characters) that is an integer in range.
+// Returns the integer, or null. Never "repairs" input: 1.5 is rejected, not 15.
+const DECIMAL_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+
+export function parseLimitInput(input, min = 1, max = 100) {
+    if (typeof input === 'number') {
+        input = String(input);
+    }
+    if (typeof input !== 'string') {
+        return null;
+    }
+    const text = input.trim();
+    if (!DECIMAL_NUMBER.test(text)) {
+        return null;
+    }
+    const value = Number(text);
+    return Number.isSafeInteger(value) && value >= min && value <= max ? value : null;
+}

@@ -142,6 +142,17 @@ still needs a manual check.
 - Look for storage quota errors in console
 - Try export/import as a workaround
 
+## Permissions
+
+The extension asks for four permissions and no host access:
+
+- **`tabs`**: lets it read each tab's `url`, `title`, favicon and group, which Chrome withholds without this permission. It uses them to count tabs and to show you which tab to close. This permission also lets the extension see the URL of every open tab, so it is the most sensitive one. Nothing is sent anywhere (see Privacy), and tab URLs and titles are never written to storage.
+- **`storage`**: saves your limits locally.
+- **`windows`**: tells windows apart and notices when one closes, so its saved limits can be cleaned up.
+- **`tabGroups`**: reads tab group names and colors so groups can have their own limits.
+
+Requires Chrome 127 or later.
+
 ## Privacy
 
 This extension:

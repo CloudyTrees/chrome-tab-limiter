@@ -165,10 +165,16 @@ chrome-tab-limiter/
 └── utils/
 
 PLUS (optional):
-├── chrome-tab-limiter.pem (if you created a CRX)
 ├── README.md
 └── Your exported settings JSON files
+
+NEVER include:
+└── chrome-tab-limiter.pem  (the CRX signing key; keep it somewhere private)
 ```
+
+The signing key proves that an update comes from you. Anyone holding it can
+publish an extension that Chrome treats as yours, so it must not end up in a
+backup ZIP, an email, or a shared folder.
 
 ### Simple Backup Script:
 ```bash
@@ -178,7 +184,7 @@ DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_NAME="tab-limiter-backup-${DATE}.zip"
 
 echo "Creating backup: ${BACKUP_NAME}"
-zip -r "${BACKUP_NAME}" chrome-tab-limiter/ README.md *.pem 2>/dev/null
+zip -r "${BACKUP_NAME}" chrome-tab-limiter/ README.md -x "*.pem" "*/*.pem" 2>/dev/null
 
 echo "✓ Backup created: ${BACKUP_NAME}"
 echo "  Size: $(du -h ${BACKUP_NAME} | cut -f1)"
@@ -214,7 +220,7 @@ Now you have a single ZIP with everything needed:
 
 ## Tips
 
-1. **Keep the PEM file safe** if you create a CRX - it's your signing key
+1. **Keep the PEM file safe, and out of backups and shared archives,** if you create a CRX - it's your signing key
 2. **Version your backups** with dates in filenames
 3. **Test the package** on a different Chrome profile before relying on it
 4. **Export your settings** regularly using the extension's export feature

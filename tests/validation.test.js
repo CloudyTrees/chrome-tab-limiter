@@ -5,6 +5,7 @@ import {
     isTrustedSender,
     isSafeReopenUrl,
     validateMessageRequest,
+    parseLimitInput,
     VALID_ACTIONS
 } from '../chrome-tab-limiter/utils/validation.js';
 
@@ -117,5 +118,34 @@ describe('validateMessageRequest', () => {
             validateMessageRequest({ action: 'tabSelectedForReplacement', tabId: 1, windowId: 2 }).valid,
             true
         );
+    });
+});
+
+describe('parseLimitInput (B-09)', () => {
+    it('accepts whole numbers in range, with surrounding spaces', () => {
+        for (const [input, expected] of [['1', 1], ['10', 10], [' 75 ', 75], ['100', 100], [5, 5], ['007', 7], ['1e2', 100], ['10.0', 10]]) {
+            assert.equal(parseLimitInput(input), expected, String(input));
+        }
+    });
+
+    it('does not rewrite malformed values into different numbers', () => {
+        // The old digit-stripping code turned these into 15, 5, 12 and 1
+        for (const input of ['1.5', '-5', '1e1.5', '1,5', '1 5', 'abc', '5abc', '0x10', '', '   ', '+', '.', 'Infinity', 'NaN']) {
+            assert.equal(parseLimitInput(input), null, JSON.stringify(input));
+        }
+    });
+
+    it('rejects values outside the range', () => {
+        for (const input of ['0', '101', '1e3', '99999999999999999999']) {
+            assert.equal(parseLimitInput(input), null, input);
+        }
+        assert.equal(parseLimitInput('75', 1, 50), null);
+        assert.equal(parseLimitInput('50', 1, 50), 50);
+    });
+
+    it('rejects non-string, non-number input', () => {
+        for (const input of [null, undefined, {}, [], true, NaN]) {
+            assert.equal(parseLimitInput(input), null, String(input));
+        }
     });
 });
