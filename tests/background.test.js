@@ -300,7 +300,7 @@ describe('movement and staleness', () => {
     it('cleans up stored limits and state when a window closes', async () => {
         await harness.chrome.storage.local.set({ tabLimit_1: 4, groupLimit_1_7: 2, tabLimit_2: 6 });
         await open();
-        harness.chrome.windows.onRemoved._fire(1);
+        await harness.chrome.tabs.remove(harness.tabIds(1)); // closing its last tab closes the window
         await flush();
 
         assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 3, tabLimit_2: 6 });
@@ -860,6 +860,257 @@ describe('window and group constraints together', () => {
 
         await startEnforcing();
         assert.equal((await getState()).startupOperations, 2, 'ending startup mode leaves the operations open');
+    });
+});
+
+// ------------------------------------------- regressions found in review
+
+// Run `hook` the first time obj[name] is called, before the real call. It lets
+// the browser change tabs while a background task is waiting on an API call.
+function once(obj, name, hook) {
+    const real = obj[name].bind(obj);
+    let armed = true;
+    obj[name] = async (...args) => {
+        if (armed) {
+            armed = false;
+            await hook();
+        }
+        return real(...args);
+    };
+}
+
+describe('browser changes while a task is running (REGRESSIONS.md)', () => {
+    beforeEach(() => setup());
+
+    describe('REG-01: a tab moved during its own admission', () => {
+        it('is not rejected in its new window', async () => {
+            await openMany(5); // window 1: 3 ordinary + 5 pending
+            let id;
+            once(harness.chrome.storage.local, 'get', async () => {
+                harness.moveTab(id, 2); // window 2 has room
+                await flush(1);
+            });
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.ok(harness.tabIds(2).includes(id), 'the moved tab stays open in window 2');
+            assert.equal((await getOp(1)).rejectedCount, 0, 'no rejection was recorded');
+            assert.equal(await getOp(2), null, 'window 2 has room, so nothing to decide there');
+        });
+
+        it('is protected as moved when its new window is full', async () => {
+            await openMany(5);
+            await openMany(2, 2); // window 2: 3 tabs, at its limit
+            let id;
+            once(harness.chrome.storage.local, 'get', async () => {
+                harness.moveTab(id, 2);
+                await flush(1);
+            });
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.ok(harness.tabIds(2).includes(id));
+            assert.equal((await getOp(2)).tabs.find((t) => t.id === id).status, 'moved');
+        });
+
+        it('is not rejected when it moves after the decision, just before the close', async () => {
+            await openMany(5);
+            let id;
+            // The task reads the tab three times (decision, re-check, last look before closing): move it on the third
+            const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+            let gets = 0;
+            harness.chrome.tabs.get = async (tabId) => {
+                if (tabId === id && ++gets === 3) {
+                    harness.moveTab(id, 2);
+                    await flush(1);
+                }
+                return realGet(tabId);
+            };
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.ok(harness.tabIds(2).includes(id), 'still open');
+            assert.equal((await getOp(1)).rejectedCount, 0, 'the rejection was taken back');
+        });
+    });
+
+    describe('REG-02: navigation while a close command runs', () => {
+        it('refuses closeSelected when a chosen tab navigated while the command waited', async () => {
+            await open();
+            const op = await getOp();
+            let seen = false;
+            harness.chrome.tabs.onUpdated.addListener((tabId, info) => {
+                if (tabId === 1 && info.url) seen = true;
+            });
+            once(harness.chrome.storage.local, 'get', async () => {
+                harness.navigate(1, 'https://new-unsaved-work.invalid/');
+                await flush(1);
+            });
+
+            const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1] }) });
+            await flush(20);
+
+            assert.equal(seen, true, 'the navigation was delivered during the command');
+            assert.equal(response.success, false);
+            assert.ok(harness.tabIds(1).includes(1), 'the navigated tab was not closed');
+        });
+
+        it('skips a tab that navigates between the check and its closing', async () => {
+            await open();
+            const op = await getOp();
+            // tab 1 is read once by the closing guard; navigate it then
+            once(harness.chrome.tabs, 'get', async () => {
+                harness.navigate(1, 'https://new-unsaved-work.invalid/');
+                await flush(1);
+            });
+
+            const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1] }) });
+            await flush(20);
+
+            assert.equal(response.success, false);
+            assert.ok(harness.tabIds(1).includes(1));
+            const after = await getOp();
+            assert.ok(after.revision > op.revision, 'the operation reopens for review');
+        });
+
+        it('applies to closePending too', async () => {
+            const pending = await open();
+            const op = await getOp();
+            once(harness.chrome.storage.local, 'get', async () => {
+                harness.navigate(pending, 'https://new-unsaved-work.invalid/');
+                await flush(1);
+            });
+
+            const response = await cmd({ action: 'closePending', ...decide(op) });
+            await flush(20);
+
+            assert.equal(response.success, false);
+            assert.ok(harness.tabIds(1).includes(pending));
+        });
+
+        it('still closes a tab that navigated before the view was shown', async () => {
+            await open();
+            harness.navigate(1, 'https://before.example/');
+            await flush(5);
+            const op = await getOp(); // the revision already reflects the navigation
+            const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1] }) });
+
+            assert.deepEqual(response, { success: true });
+            assert.equal(harness.tabIds(1).includes(1), false);
+        });
+
+        it('keeps no URL anywhere in the stored state', async () => {
+            await open();
+            harness.navigate(1, 'https://secret-page.invalid/private');
+            await flush(5);
+            assert.equal(JSON.stringify(await savedState()).includes('secret-page'), false);
+            assert.equal(JSON.stringify(harness.chrome.storage.local._dump()).includes('secret-page'), false);
+        });
+    });
+
+    describe('REG-03: a tab replaced while it is being admitted', () => {
+        it('is decided once under its new ID when the old ID is gone before the first read', async () => {
+            let old;
+            let release;
+            const gate = new Promise((resolve) => (release = resolve));
+            once(harness.chrome.tabs, 'get', () => gate);
+            old = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(1);
+            harness.replaceTab(old, 2000);
+            await flush(1);
+            release();
+            await flush(20);
+
+            const op = await getOp();
+            assert.ok(op, 'window 1 is over: 4 tabs, limit 3');
+            assert.equal(op.tabs.find((t) => t.id === 2000).status, 'pending');
+            assert.equal(harness.tabIds(1).length, op.tabs.length, 'every real tab is counted and shown');
+
+            await open();
+            const next = await getOp();
+            assert.equal(harness.tabIds(1).length, next.tabs.length, 'still every real tab, after another creation');
+            assert.ok(next.tabs.some((t) => t.id === 2000));
+        });
+
+        it('is decided once when replaced after the first read', async () => {
+            let old;
+            once(harness.chrome.storage.local, 'get', async () => {
+                harness.replaceTab(old, 2000);
+                await flush(1);
+            });
+            old = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            const op = await getOp();
+            assert.equal(op.tabs.find((t) => t.id === 2000)?.status, 'pending');
+            assert.equal(harness.tabIds(1).length, op.tabs.length);
+            await open();
+            assert.equal((await getOp()).tabs.length, harness.tabIds(1).length);
+        });
+
+        it('a replacement of a tab that is to be rejected is the one rejected', async () => {
+            await openMany(5);
+            let old;
+            once(harness.chrome.storage.local, 'get', async () => {
+                harness.replaceTab(old, 2000);
+                await flush(1);
+            });
+            old = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.equal(harness.tabIds(1).includes(2000), false, 'rejected under its new ID');
+            assert.equal((await getOp()).rejectedCount, 1);
+        });
+    });
+
+    describe('REG-04: a limit raised while an operation is open', () => {
+        it('admits the next tab and clears the resolved operation', async () => {
+            await openMany(5);
+            await harness.chrome.storage.local.set({ defaultTabLimit: 100 });
+            const id = await open();
+
+            assert.ok(harness.tabIds(1).includes(id), 'the new tab fits the new limit');
+            assert.equal(harness.tabIds(1).length, 9);
+            assert.equal(await getOp(), null);
+        });
+
+        it('shows no stale operation and clears the badge straight away', async () => {
+            await openMany(5);
+            assert.equal(harness.calls.badge, '5');
+            await harness.chrome.storage.local.set({ defaultTabLimit: 100 });
+            await flush();
+
+            assert.equal(harness.calls.badge, '', 'the settings change reconciled in the background');
+            assert.equal(await getOp(), null, 'no operation with an empty constraint list');
+        });
+
+        it('tells open popups when a settings change resolves an operation', async () => {
+            await openMany(5);
+            const { messages } = harness.connectPort();
+            await harness.chrome.storage.local.set({ defaultTabLimit: 100 });
+            await flush();
+
+            assert.equal(messages.at(-1).revisions[1], null);
+        });
+
+        it('refuses a command made against the operation the new limit resolved', async () => {
+            await openMany(2);
+            const op = await getOp();
+            await harness.chrome.storage.local.set({ defaultTabLimit: 100 });
+            const response = await cmd({ action: 'closePending', ...decide(op) });
+
+            assert.equal(response.success, false);
+            assert.equal(harness.tabIds(1).length, 5, 'nothing closed');
+        });
+
+        it('lowering a limit opens an operation without closing anything', async () => {
+            await harness.chrome.storage.local.set({ defaultTabLimit: 2 });
+            await flush();
+
+            const op = await getOp();
+            assert.ok(op, 'three tabs now exceed a limit of two');
+            assert.equal(harness.tabIds(1).length, 3);
+        });
     });
 });
 

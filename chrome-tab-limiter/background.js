@@ -50,6 +50,18 @@ const queue = createSerialQueue();
 // excess that the user reviews (plan §7).
 const undecided = new Set();
 
+// Old tab ID -> new tab ID for a tab Chrome replaced (REG-03). A task that is
+// still working on the old ID follows this to the replacement, so the new tab
+// gets exactly one admission decision. Cleared by the replacement's own task.
+const replacedBy = new Map();
+
+// Navigations are noted the moment the event arrives, not when its queued task
+// runs (REG-02). `navSeq` counts them and `navigatedAt` remembers the latest one
+// per tab. A close command compares against the count when its message arrived.
+// Only numbers are kept, never a URL.
+let navSeq = 0;
+const navigatedAt = new Map();
+
 // Highest tab ID whose creation we have heard about. Chrome assigns tab IDs in
 // increasing order and delivers onCreated in that order, so a tab with a higher
 // ID exists but has not been announced yet: it is not counted until its own
@@ -161,6 +173,44 @@ async function loadOrInitialize(local) {
 
 async function persist(state) {
     await saveState(chrome.storage.session, state);
+}
+
+// Reconcile one window with its real tabs and the current settings, and save
+// and publish if that changed anything (REG-04). Used before any decision or
+// command, so a raised limit is never judged against an out-of-date operation.
+async function refreshWindow(state, local, windowId) {
+    const before = JSON.stringify(state);
+    await settleWindow(state, local, windowId);
+    if (JSON.stringify(state) !== before) {
+        await persist(state);
+        await publish(state);
+    }
+}
+
+// The tab now, following a replacement if Chrome swapped its ID. null if it is gone.
+async function currentTab(tabId) {
+    let id = tabId;
+    for (let hops = 0; hops < 5; hops++) {
+        try {
+            return await chrome.tabs.get(id);
+        } catch {
+            const next = replacedBy.get(id);
+            if (next === undefined) {
+                return null;
+            }
+            id = next;
+        }
+    }
+    return null;
+}
+
+// Stop treating a tab, and anything that replaced it, as undecided
+function forgetUndecided(tabId) {
+    let id = tabId;
+    for (let hops = 0; hops < 5 && id !== undefined; hops++) {
+        undecided.delete(id);
+        id = replacedBy.get(id);
+    }
 }
 
 // ------------------------------------------------------------ reconciliation
@@ -357,20 +407,31 @@ function runEvent(name, task) {
     queue.enqueue(task).catch((error) => safeErrorLog(`Error handling ${name}`, error));
 }
 
-async function handleCreated(tabId) {
+async function handleCreated(originalId) {
+    let tabId = originalId;
     try {
-        let tab;
-        try {
-            tab = await chrome.tabs.get(tabId);
-        } catch {
+        let tab = await currentTab(tabId);
+        if (!tab) {
             return; // gone before we looked at it
         }
+        tabId = tab.id;
 
         const local = await loadSettings();
         const state = await loadOrInitialize(local);
         const windowId = tab.windowId;
+        await settleWindow(state, local, windowId); // judge against current limits (REG-04)
         const win = windowOf(state, windowId);
         const { all, counted } = await readWindow(windowId);
+
+        // Look again right before deciding: the tab may have moved to another
+        // window (its move is handled on its own, REG-01), been regrouped, or
+        // been replaced (REG-03)
+        const fresh = await currentTab(tabId);
+        if (!fresh || fresh.windowId !== windowId) {
+            return;
+        }
+        tab = fresh;
+        tabId = fresh.id;
 
         const decision = decideCreation({
             tabs: counted,
@@ -388,7 +449,7 @@ async function handleCreated(tabId) {
             action = 'admit'; // never close the last tab in a window
         }
 
-        undecided.delete(tabId);
+        forgetUndecided(originalId);
 
         if (action === 'admit') {
             touch(win);
@@ -403,10 +464,16 @@ async function handleCreated(tabId) {
         await persist(state);
 
         if (action === 'reject') {
-            try {
-                await chrome.tabs.remove(tabId);
-            } catch (error) {
-                safeErrorLog('Error rejecting tab', error);
+            // Last look: only reject a tab that is still where it was decided
+            const last = await currentTab(tabId);
+            if (last && last.windowId === windowId && (last.groupId ?? -1) === (tab.groupId ?? -1)) {
+                try {
+                    await chrome.tabs.remove(last.id);
+                } catch (error) {
+                    safeErrorLog('Error rejecting tab', error);
+                }
+            } else {
+                win.op.rejectedCount -= 1; // not rejected after all; its move or change is handled separately
             }
         }
         if (action !== 'admit') {
@@ -417,7 +484,8 @@ async function handleCreated(tabId) {
         await persist(state);
         await publish(state);
     } finally {
-        undecided.delete(tabId);
+        forgetUndecided(originalId);
+        forgetUndecided(tabId);
     }
 }
 
@@ -546,8 +614,21 @@ async function handleReplaced(addedTabId, removedTabId) {
             touch(win);
         }
     }
+    replacedBy.delete(removedTabId); // any task holding the old ID has finished: it ran earlier in the queue
     await persist(state);
     broadcast(state);
+}
+
+// Settings changed (limits or the pending cap): reconcile every window now, so
+// the badge and an open popup are current and no stale operation is left (REG-04)
+async function handleSettingsChanged() {
+    const local = await loadSettings();
+    const state = await loadOrInitialize(local);
+    for (const { id: windowId } of await chrome.windows.getAll()) {
+        await settleWindow(state, local, windowId);
+    }
+    await persist(state);
+    await publish(state);
 }
 
 async function handleWindowRemoved(windowId) {
@@ -567,6 +648,7 @@ async function handleWindowRemoved(windowId) {
 // ------------------------------------------------------- popup commands (§6)
 
 const fail = (error) => ({ success: false, error });
+const STALE_MESSAGE = 'The tabs changed; please review again';
 
 // A per-window command must match the open operation exactly
 function checkOperation(state, request) {
@@ -575,7 +657,7 @@ function checkOperation(state, request) {
         return { error: 'There is nothing to decide in this window' };
     }
     if (win.op.opId !== request.opId || win.op.revision !== request.revision) {
-        return { error: 'The tabs changed; please review again' };
+        return { error: STALE_MESSAGE };
     }
     if (win.op.phase !== 'open') {
         return { error: 'A closing operation is already running' };
@@ -585,9 +667,19 @@ function checkOperation(state, request) {
 
 // Close tabs one at a time, re-checking each. A tab that moved, vanished or
 // changed group is skipped, and the last tab in the window is never closed.
-async function closeTabsGuarded(windowId, expected) {
+// A tab that navigated after the command arrived is skipped: the page the user
+// chose to close is no longer the page they saw (R3, REG-02). Returns how many
+// tabs were closed and whether any was skipped for that reason.
+const navigatedSince = (tabId, since) => (navigatedAt.get(tabId) ?? 0) > since;
+
+async function closeTabsGuarded(windowId, expected, since) {
     let closed = 0;
+    let stale = false;
     for (const { id, groupId } of expected) {
+        if (navigatedSince(id, since)) {
+            stale = true;
+            continue;
+        }
         let tab;
         try {
             tab = await chrome.tabs.get(id);
@@ -601,6 +693,10 @@ async function closeTabsGuarded(windowId, expected) {
         if (remaining.length <= 1) {
             break;
         }
+        if (navigatedSince(id, since)) {
+            stale = true;
+            continue;
+        }
         try {
             await chrome.tabs.remove(id);
             closed += 1;
@@ -608,28 +704,32 @@ async function closeTabsGuarded(windowId, expected) {
             safeErrorLog('Error closing tab', error);
         }
     }
-    return closed;
+    return { closed, stale };
 }
 
 // Record the decision, close the tabs, then reconcile from the real tabs
-async function carryOutClosing(state, local, windowId, expected) {
+async function carryOutClosing(state, local, windowId, expected, since) {
+    if (expected.some((tab) => navigatedSince(tab.id, since))) {
+        return fail(STALE_MESSAGE); // a chosen tab navigated while the command waited
+    }
     const win = state.windows[windowId];
     win.op.phase = 'closing';
     win.op.closing = expected.map((tab) => tab.id);
     state.startupMode = false; // the user's first decision
     await persist(state);
 
-    await closeTabsGuarded(windowId, expected);
+    const { stale } = await closeTabsGuarded(windowId, expected, since);
 
     await settleWindow(state, local, windowId, { endClosing: true, bump: true });
     await persist(state);
     await publish(state);
-    return { success: true };
+    return stale ? fail(STALE_MESSAGE) : { success: true };
 }
 
-async function cmdCloseSelected(request) {
+async function cmdCloseSelected(request, since) {
     const local = await loadSettings();
     const state = await loadOrInitialize(local);
+    await refreshWindow(state, local, request.windowId);
     const checked = checkOperation(state, request);
     if (checked.error) {
         return fail(checked.error);
@@ -650,12 +750,13 @@ async function cmdCloseSelected(request) {
         return fail('Closing these tabs would not resolve every limit');
     }
 
-    return carryOutClosing(state, local, request.windowId, selection.map((id) => byId.get(id)));
+    return carryOutClosing(state, local, request.windowId, selection.map((id) => byId.get(id)), since);
 }
 
-async function cmdClosePending(request) {
+async function cmdClosePending(request, since) {
     const local = await loadSettings();
     const state = await loadOrInitialize(local);
+    await refreshWindow(state, local, request.windowId);
     const checked = checkOperation(state, request);
     if (checked.error) {
         return fail(checked.error);
@@ -674,12 +775,13 @@ async function cmdClosePending(request) {
         return fail('Closing these would close the window; choose tabs instead');
     }
 
-    return carryOutClosing(state, local, request.windowId, targets);
+    return carryOutClosing(state, local, request.windowId, targets, since);
 }
 
 async function cmdKeepThese(request) {
     const local = await loadSettings();
     const state = await loadOrInitialize(local);
+    await refreshWindow(state, local, request.windowId);
     const checked = checkOperation(state, request);
     if (checked.error) {
         return fail(checked.error);
@@ -726,6 +828,7 @@ async function titleOfGroup(windowId, groupId) {
 async function cmdGetState(request) {
     const local = await loadSettings();
     const state = await loadOrInitialize(local);
+    await refreshWindow(state, local, request.windowId);
     const win = state.windows[request.windowId];
     const response = {
         success: true,
@@ -813,6 +916,7 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
     undecided.delete(tabId);
+    navigatedAt.delete(tabId);
     runEvent('tab removal', () => handleRemoved(tabId, removeInfo.windowId));
 });
 
@@ -825,19 +929,33 @@ chrome.tabs.onAttached.addListener((tabId) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url !== undefined) {
+        navSeq += 1; // noted now, before the queued task runs (REG-02)
+        navigatedAt.set(tabId, navSeq);
+        runEvent('navigation', () => handleNavigated(tabId));
+    }
     if (changeInfo.groupId !== undefined) {
         runEvent('group change', () => handleGroupChanged(tabId));
-    } else if (changeInfo.url !== undefined) {
-        runEvent('navigation', () => handleNavigated(tabId));
     }
 });
 
 chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
     announcedUpTo = Math.max(announcedUpTo, addedTabId); // the replacement is a known tab
+    replacedBy.set(removedTabId, addedTabId);
+    if (navigatedAt.has(removedTabId)) {
+        navigatedAt.set(addedTabId, navigatedAt.get(removedTabId));
+        navigatedAt.delete(removedTabId);
+    }
     if (undecided.delete(removedTabId)) {
-        undecided.add(addedTabId);
+        undecided.add(addedTabId); // the task that holds the old ID decides the new one too
     }
     runEvent('tab replacement', () => handleReplaced(addedTabId, removedTabId));
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && Object.keys(changes).some((key) => /^(defaultTabLimit|tabLimit_|groupLimit_|maxPendingPerWindow)/.test(key))) {
+        runEvent('settings change', handleSettingsChanged);
+    }
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
@@ -867,8 +985,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
     }
 
+    const arrivedAt = navSeq; // navigations heard after this point invalidate the selection
     queue
-        .enqueue(() => COMMANDS[request.action](request))
+        .enqueue(() => COMMANDS[request.action](request, arrivedAt))
         .then(sendResponse)
         .catch((error) => {
             safeErrorLog(`Error handling ${request.action}`, error);

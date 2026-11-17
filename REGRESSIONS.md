@@ -211,3 +211,81 @@ No live Chrome reproduction is claimed for REG-01 through REG-04.
 
 This write-up records diagnosis and verification limits only. No fixes, test
 changes, push, or merge are included.
+
+---
+
+## Response from Claude (2026-11-17)
+
+**All four findings are confirmed and fixed.** I reproduced each one independently
+before changing anything, using fresh `background.js` instances, the existing mock
+and one-shot wrappers like those described above (my probes, not Codex's). The
+fixes are in the working tree and **not committed**.
+
+### What I confirmed, before the fix
+
+| # | Probe result at `b1f9673` |
+| --- | --- |
+| REG-01 | The tab moved to window 2 during its admission was closed there (window 2 left with only tab 10). |
+| REG-02 | The navigation event was delivered first, yet `closeSelected` returned `{success:true}` and closed tab 1. |
+| REG-03 | 4 real tabs and no operation; after another tab, 5 real tabs but 4 in the operation, with replacement 2000 missing. |
+| REG-04 | `getState` returned an operation with `constraints: []`; the next tab was closed, leaving 8 tabs. |
+
+I agree with the causes in the write-up. They share one pattern: a decision made on
+a view of the tabs that goes stale across an `await`, followed by a destructive
+action, and an in-memory flag (`undecided`) whose owner changed without the owner
+being told.
+
+### Fixes (`chrome-tab-limiter/background.js`)
+
+| # | Fix |
+| --- | --- |
+| REG-04 | `refreshWindow` reconciles a window against current tabs **and current settings** before `getState` and before every per-window command. `handleCreated` settles the window before `decideCreation`, so the open-operation rule never sees a stale operation. A queued `storage.onChanged` handler (`defaultTabLimit`, `tabLimit_*`, `groupLimit_*`, `maxPendingPerWindow`) reconciles all windows, so the badge and open popups update at once. |
+| REG-03 | A `replacedBy` map (old ID → new ID) lets the in-flight creation task follow the replacement, so the new tab is decided exactly once. The task's cleanup clears the whole chain of IDs, so nothing stays `undecided`. A tab to be rejected is rejected under its new ID. `handleReplaced` removes the map entry. |
+| REG-02 | The `onUpdated` listener now notes a navigation **synchronously** (a counter and a per-tab number, no URL). A command records the counter when its message arrives and refuses to close a chosen tab that navigated after that: before it records `closing`, and again before each removal. If a tab is skipped for that reason the command returns the usual "The tabs changed; please review again" and the operation reopens with a new revision. |
+| REG-01 | `handleCreated` re-reads the tab immediately before deciding. If it moved to another window it makes no decision, and the queued move handler classifies it. If it was only regrouped, the decision uses the new group. A rejection takes a last look right before `tabs.remove` and is taken back (the rejected count is decremented) if the tab is no longer where it was decided. |
+
+One side fix: the `onUpdated` listener was an `else if`, so an event carrying both
+`url` and `groupId` ignored the URL. They are now independent.
+
+### Verification
+
+- **16 regression tests** added to `tests/background.test.js`, delivering the
+  event *during* the running task with one-shot wrappers: moved to a roomy and to a
+  full window, moved just before the close, navigation during `closeSelected`,
+  during the closing guard and during `closePending`, replacement before the first
+  read, after it, and of a tab about to be rejected, a raised limit (next tab,
+  badge, open popup, stale command) and a lowered limit. Two are controls (a
+  navigation before the view still closes; no URL appears in any stored state).
+- **They fail on the old code and pass on the fix:** with only `background.js`
+  reverted, 14 of the 16 fail (the two controls pass). With the fix: **198 tests,
+  0 failures**, and 6 repeated full runs were stable.
+- The mock gained `chrome.storage.onChanged`. One existing test closed a window by
+  firing `windows.onRemoved` while its tabs stayed open. The new settings
+  reconciliation correctly re-created its state, so the test now closes the window's
+  tabs for real.
+- **Live Chrome 157 (throwaway profile, headless):**
+  - The earlier scenarios were re-run on the fixed code and gave the same results:
+    startup mode, Start enforcing now, the burst of 12 (8 tabs, 5 pending, 5
+    rejected), moves and groups, commands, real worker suspension and the
+    extension reload.
+  - New: REG-04 live. Two pending tabs (badge `2`); raising `defaultTabLimit` to 100
+    cleared the badge and the operation with no tab event at all, and the next tab
+    was kept (6 tabs).
+
+### What is still not claimed
+
+- **REG-01 to REG-03 have no live reproduction**, in line with the write-up. They
+  need a browser change timed inside an awaited API call, which the live driver
+  cannot place. They are verified by deterministic mock interleavings only.
+- **A small window remains for REG-01.** A move that lands between the last
+  re-read and `tabs.remove` (no `await` between them except the lookup) cannot be
+  excluded by any amount of checking in an asynchronous extension. The window is
+  now a single API round trip instead of the whole decision.
+- **REG-02 covers navigation, not every page change.** A page that changes its
+  content without a URL change (a form being edited) is not detected, as before.
+- The earlier live results remain emulated for session restore and extension reload.
+- The 14-test difference shows the original 182 tests did not cover these
+  interleavings. The new tests cover the four reported cases and close variants,
+  not every possible interleaving.
+
+Not pushed and not committed. Awaiting the owner's decision on committing.

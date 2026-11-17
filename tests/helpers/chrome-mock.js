@@ -20,7 +20,7 @@ function createEvent() {
     };
 }
 
-function createStorageArea() {
+function createStorageArea(onChange = () => {}) {
     let data = {};
     const clone = (v) => structuredClone(v);
 
@@ -47,17 +47,25 @@ function createStorageArea() {
             return out;
         },
         async set(items) {
+            const changes = {};
             for (const [k, v] of Object.entries(items)) {
+                changes[k] = { oldValue: data[k], newValue: clone(v) };
                 data[k] = clone(v);
             }
+            onChange(changes);
         },
         async remove(keys) {
+            const changes = {};
             for (const k of [].concat(keys)) {
+                if (k in data) changes[k] = { oldValue: data[k] };
                 delete data[k];
             }
+            onChange(changes);
         },
         async clear() {
+            const changes = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, { oldValue: v }]));
             data = {};
+            onChange(changes);
         },
         // Test-only helper: synchronous snapshot
         _dump: () => clone(data)
@@ -97,7 +105,8 @@ export function createChromeMock({ tabs = [] } = {}) {
         tabsOnReplaced: createEvent(),
         windowsOnRemoved: createEvent(),
         runtimeOnMessage: createEvent(),
-        runtimeOnConnect: createEvent()
+        runtimeOnConnect: createEvent(),
+        storageOnChanged: createEvent()
     };
 
     // Chrome fires events asynchronously, after the API call resolves
@@ -116,8 +125,9 @@ export function createChromeMock({ tabs = [] } = {}) {
             onMessage: events.runtimeOnMessage
         },
         storage: {
-            local: createStorageArea(),
-            session: createStorageArea()
+            local: createStorageArea((changes) => fireLater(events.storageOnChanged, changes, 'local')),
+            session: createStorageArea((changes) => fireLater(events.storageOnChanged, changes, 'session')),
+            onChanged: events.storageOnChanged
         },
         tabs: {
             async get(tabId) {
