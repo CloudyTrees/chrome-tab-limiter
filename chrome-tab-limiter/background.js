@@ -439,6 +439,18 @@ const MAX_ATTEMPTS = 3;
 // never a rejectable new one.
 async function handleCreated(originalId, createdAfterMove) {
     let tabId = originalId;
+    let deferred = false;
+
+    // Settings kept changing for the whole attempt budget. Never close a tab on
+    // out-of-date limits and never let it past the pending cap: hand it to a
+    // follow-up task queued behind the pending settings changes. That task owns
+    // the tab, which stays undecided (uncounted, unclassified) until it decides
+    // it, once, under the then-current rules (REG-04d).
+    const deferDecision = () => {
+        deferred = true;
+        runEvent('tab creation retry', () => handleCreated(tabId, createdAfterMove));
+    };
+
     try {
         for (let attempt = 1; ; attempt++) {
             // Everything the decision rests on is read inside this loop. If a
@@ -471,8 +483,11 @@ async function handleCreated(originalId, createdAfterMove) {
             if (movedSince(identityChain(originalId), createdAfterMove)) {
                 return; // it was moved, even if it came back: the move handler protects it (REG-01a)
             }
-            if (settingsChangedSince(windowId, settingsAt) && attempt < MAX_ATTEMPTS) {
-                continue;
+            if (settingsChangedSince(windowId, settingsAt)) {
+                if (attempt < MAX_ATTEMPTS) {
+                    continue;
+                }
+                return deferDecision();
             }
 
             const decision = decideCreation({
@@ -510,27 +525,26 @@ async function handleCreated(originalId, createdAfterMove) {
                     if (attempt < MAX_ATTEMPTS) {
                         continue; // decide again under the new settings
                     }
-                    action = 'pending'; // settings kept changing: never close on out-of-date limits
-                } else {
-                    try {
-                        await chrome.tabs.remove(last.id);
-                    } catch (error) {
-                        safeErrorLog('Error rejecting tab', error);
-                    }
-                    forgetUndecided(originalId);
-                    win.op.rejectedCount += 1;
-                    await persist(state);
-                    present(windowId);
-                    await finishCreation(state, local, windowId);
-                    return;
+                    return deferDecision();
                 }
+                try {
+                    await chrome.tabs.remove(last.id);
+                } catch (error) {
+                    safeErrorLog('Error rejecting tab', error);
+                }
+                forgetUndecided(originalId);
+                win.op.rejectedCount += 1;
+                await persist(state);
+                present(windowId);
+                await finishCreation(state, local, windowId);
+                return;
             }
 
             forgetUndecided(originalId);
             if (action === 'admit') {
                 touch(win);
             } else {
-                ensureOperation(win, decision.opKind ?? (state.startupMode ? 'startup' : 'normal'));
+                ensureOperation(win, decision.opKind);
                 win[action].push(tabId);
                 touch(win);
             }
@@ -542,8 +556,10 @@ async function handleCreated(originalId, createdAfterMove) {
             return;
         }
     } finally {
-        forgetUndecided(originalId);
-        forgetUndecided(tabId);
+        if (!deferred) {
+            forgetUndecided(originalId);
+            forgetUndecided(tabId);
+        }
     }
 }
 

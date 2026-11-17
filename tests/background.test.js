@@ -1402,28 +1402,67 @@ describe('second review findings (REGRESSIONS.md, Codex verification of round 2)
             assert.equal(await getOp(), null);
         });
 
-        it('when settings keep changing it keeps the tab rather than closing on out-of-date limits', async () => {
-            await openMany(5);
-            let id;
+        // Change a setting on the final lookup of each attempt: calls 3, 6 and 9 for the tab
+        function changeSettingsEachAttempt(getId, changes) {
             const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
             let calls = 0;
-            const limits = [4, 5, 6];
             harness.chrome.tabs.get = async (tabId) => {
-                if (tabId === id) {
-                    calls += 1;
-                    if (calls % 3 === 0 && limits.length > 0) {
-                        await harness.chrome.storage.local.set({ defaultTabLimit: limits.shift() });
-                        await flush(1);
-                    }
+                if (tabId === getId() && ++calls % 3 === 0 && changes.length > 0) {
+                    await harness.chrome.storage.local.set(changes.shift());
+                    await flush(1);
                 }
                 return realGet(tabId);
             };
-            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
-            await flush(30);
+            return () => (harness.chrome.tabs.get = realGet);
+        }
 
-            assert.ok(harness.tabIds(1).includes(id), 'not closed');
-            assert.equal(harness.calls.removeAttempts.includes(id), false);
-            assert.equal((await getOp()).rejectedCount, 0);
+        it('REG-04d: when settings keep changing, the tab is decided once under the settled rules, never past the cap', async () => {
+            await openMany(5); // cap full
+            let id;
+            changeSettingsEachAttempt(() => id, [{ defaultTabLimit: 4 }, { defaultTabLimit: 5 }, { defaultTabLimit: 6 }]);
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(40);
+
+            // Limit 6 still leaves the window over and the cap is full: rejected, exactly once
+            assert.equal(harness.tabIds(1).includes(id), false);
+            assert.equal(harness.calls.removeAttempts.filter((removed) => removed === id).length, 1);
+            const op = await getOp();
+            assert.equal(op.rejectedCount, 1);
+            assert.equal(op.pendingCount, 5, 'no extra pending slot');
+        });
+
+        it('REG-04d: repeated exhaustion cannot accumulate pending tabs (alternating window limit)', async () => {
+            await openMany(5);
+            let toggle = 3;
+            for (let i = 0; i < 3; i++) {
+                let id;
+                const restore = changeSettingsEachAttempt(
+                    () => id,
+                    Array.from({ length: 3 }, () => ({ tabLimit_1: (toggle = toggle === 3 ? 4 : 3) }))
+                );
+                id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+                await flush(40);
+                restore();
+            }
+            const next = await open();
+
+            const op = await getOp();
+            assert.equal(op.pendingCount, 5, 'the cap held through every exhaustion');
+            assert.equal(op.rejectedCount, 4, 'all four extra tabs were rejected');
+            assert.equal(harness.tabIds(1).length, 8);
+            assert.equal(harness.tabIds(1).includes(next), false);
+        });
+
+        it('REG-04d: when the settings settle on limits the tab fits, it is admitted', async () => {
+            await openMany(5);
+            let id;
+            changeSettingsEachAttempt(() => id, [{ defaultTabLimit: 4 }, { defaultTabLimit: 5 }, { defaultTabLimit: 100 }]);
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(40);
+
+            assert.ok(harness.tabIds(1).includes(id));
+            assert.equal(harness.tabIds(1).length, 9);
+            assert.equal(await getOp(), null);
         });
 
         it('the next ordinary creation is still held to the cap afterwards', async () => {
