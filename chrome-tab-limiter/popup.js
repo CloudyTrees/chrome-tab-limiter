@@ -377,6 +377,12 @@ async function displayTabGroups(groups, groupCounts, ungroupedCount) {
 // Create HTML for a group item
 function createGroupItemHTML(groupId, title, color, count, limit) {
     const safeTitle = escapeHtml(title);
+    // Everything but the title is a number or a fixed color; coerce so that nothing
+    // stored or reported can ever add markup to an attribute
+    groupId = Number(groupId);
+    count = Number(count);
+    limit = Number(limit);
+    color = escapeHtml(color);
     const inputId = `group-${groupId}`;
 
     return `
@@ -403,7 +409,9 @@ async function getGroupLimitLocal(groupId) {
             : `groupLimit_${currentWindowId}_${groupId}`;
         const result = await chrome.storage.local.get([key, 'defaultTabLimit']);
 
-        return result[key] || result.defaultTabLimit || 10;
+        // Only a whole number in range is ever shown; anything else falls back
+        const asLimit = (value) => (Number.isInteger(value) && value >= 1 && value <= 100 ? value : null);
+        return asLimit(result[key]) ?? asLimit(result.defaultTabLimit) ?? 10;
     } catch (error) {
         return 10;
     }

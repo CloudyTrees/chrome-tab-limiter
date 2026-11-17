@@ -155,6 +155,66 @@ describe('pending-tab cap in export and import', () => {
     });
 });
 
+describe('export file name (S-5)', () => {
+    it('carries no date or time, because the file content has none either', () => {
+        const name = api.generateExportFilename();
+        assert.equal(name, 'tab-limiter-settings.json');
+        assert.equal(/\d/.test(name), false);
+    });
+});
+
+describe('replacing settings never loses them on a failed write (S-7)', () => {
+    const seed = () => harness.chrome.storage.local.set({ defaultTabLimit: 7, tabLimit_1: 4, groupLimit_1_2: 3, maxPendingPerWindow: 8, hasSeenWelcome: true });
+
+    it('a failed write during import leaves every existing setting in place', async () => {
+        await seed();
+        const before = harness.chrome.storage.local._dump();
+        const realSet = harness.chrome.storage.local.set;
+        harness.chrome.storage.local.set = async () => {
+            throw new Error('quota exceeded');
+        };
+
+        await assert.rejects(api.importSettings(validFile({ defaultTabLimit: 20 })), /quota/);
+
+        harness.chrome.storage.local.set = realSet;
+        assert.deepEqual(harness.chrome.storage.local._dump(), before);
+    });
+
+    it('a failed write during reset leaves every existing setting in place', async () => {
+        await seed();
+        const before = harness.chrome.storage.local._dump();
+        const realSet = harness.chrome.storage.local.set;
+        harness.chrome.storage.local.set = async () => {
+            throw new Error('quota exceeded');
+        };
+
+        await assert.rejects(api.resetAllSettings(), /Failed to reset/);
+
+        harness.chrome.storage.local.set = realSet;
+        assert.deepEqual(harness.chrome.storage.local._dump(), before);
+    });
+
+    it('a successful import still replaces everything', async () => {
+        await seed();
+        await api.importSettings(validFile({ defaultTabLimit: 20, maxPendingPerWindow: 3 }));
+        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 20, maxPendingPerWindow: 3 });
+    });
+
+    it('a successful reset still leaves only the default limit', async () => {
+        await seed();
+        await api.resetAllSettings();
+        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 10 });
+    });
+
+    it('merging keeps the settings that are not imported', async () => {
+        await seed();
+        await api.importSettings(validFile({ defaultTabLimit: 20 }), { mergeLimits: true });
+        const stored = harness.chrome.storage.local._dump();
+        assert.equal(stored.defaultTabLimit, 20);
+        assert.equal(stored.tabLimit_1, 4);
+    });
+});
+
 describe('importSettings', () => {
     it('replace mode (the default) clears existing settings first', async () => {
         await harness.chrome.storage.local.set({ defaultTabLimit: 3, tabLimit_1: 5 });

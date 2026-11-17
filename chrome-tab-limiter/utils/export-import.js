@@ -99,6 +99,17 @@ async function exportSettings() {
     }
 }
 
+// Make storage.local hold exactly `data`. The new values are written before the
+// old keys are removed, so if the write fails nothing has been lost.
+async function replaceStoredSettings(data) {
+    const existing = await chrome.storage.local.get(null);
+    await chrome.storage.local.set(data);
+    const stale = Object.keys(existing).filter((key) => !(key in data));
+    if (stale.length > 0) {
+        await chrome.storage.local.remove(stale);
+    }
+}
+
 // Import settings from a JSON object
 async function importSettings(importData, options = {}) {
     try {
@@ -145,13 +156,13 @@ async function importSettings(importData, options = {}) {
             skippedGroupLimits = Object.keys(importData.settings.groupLimits).length;
         }
         
-        // Clear existing data if replacing
+        // Save the imported data first. When replacing, remove what is left
+        // afterwards, so a failed write never leaves the user with no settings.
         if (replaceExisting && !mergeLimits) {
-            await chrome.storage.local.clear();
+            await replaceStoredSettings(storageData);
+        } else {
+            await chrome.storage.local.set(storageData);
         }
-        
-        // Save imported data
-        await chrome.storage.local.set(storageData);
         
         debugLog('Import completed successfully');
         
@@ -326,13 +337,8 @@ async function resetAllSettings() {
     try {
         debugLog('Resetting all settings...');
         
-        // Clear all storage
-        await chrome.storage.local.clear();
-        
-        // Set default values
-        await chrome.storage.local.set({
-            defaultTabLimit: 10
-        });
+        // Write the defaults first, then remove everything else
+        await replaceStoredSettings({ defaultTabLimit: 10 });
         
         debugLog('All settings reset successfully');
         
@@ -344,12 +350,10 @@ async function resetAllSettings() {
     }
 }
 
-// Generate filename for export
+// Generate filename for export. No date or time: the file's content omits them
+// on purpose, so its name should not add them back.
 function generateExportFilename() {
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-    const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
-    return `tab-limiter-settings-${dateStr}-${timeStr}.json`;
+    return 'tab-limiter-settings.json';
 }
 
 // Download data as JSON file

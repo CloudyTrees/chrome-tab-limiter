@@ -1475,6 +1475,26 @@ describe('second review findings (REGRESSIONS.md, Codex verification of round 2)
     });
 });
 
+describe('getState exposes only what the popup uses (S-3)', () => {
+    it('sends titles and statuses but no favicon URL or page URL', async () => {
+        await setup();
+        harness.chrome.tabs.query = async () => [
+            { id: 1, windowId: 1, groupId: -1, title: 'A', url: 'https://secret.example/a', favIconUrl: 'https://secret.example/icon.png' },
+            { id: 2, windowId: 1, groupId: -1, title: 'B', url: 'https://secret.example/b', favIconUrl: 'https://secret.example/icon.png' },
+            { id: 3, windowId: 1, groupId: -1, title: 'C', url: 'https://secret.example/c', favIconUrl: 'https://secret.example/icon.png' }
+        ];
+        await harness.chrome.storage.local.set({ defaultTabLimit: 2 });
+        await flush();
+
+        const response = await getState();
+        assert.ok(response.operation, 'window 1 is over its limit of 2');
+        const json = JSON.stringify(response);
+        assert.equal(json.includes('secret.example'), false, 'no URL of any kind is sent');
+        assert.equal(json.includes('favIconUrl'), false);
+        assert.deepEqual(response.operation.tabs.map((t) => t.title), ['A', 'B', 'C']);
+    });
+});
+
 // ---------------------------------------------------------- message security
 
 describe('message security', () => {

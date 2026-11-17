@@ -1,118 +1,85 @@
 # Packaging Chrome Tab Limiter for Personal Use
 
-## Method 1: Simple ZIP Package (Easiest)
+**Never package the working folder.** It can contain editor recovery files
+(`*.swp`), signing keys (`*.pem`), exported settings and other local files that
+you did not mean to share. Every recipe below builds from an explicit list of the
+runtime files instead, and ends with a step that makes you look at the result.
 
-This is perfect for backing up or sharing with yourself across computers.
+## Method 1: ZIP of the runtime files (easiest)
 
-### Steps:
+From the repository root:
+
 ```bash
-# 1. Navigate to the parent directory
-cd path/to/your/project
-
-# 2. Create a ZIP file of the extension
-zip -r chrome-tab-limiter.zip chrome-tab-limiter/
-
-# Or on Windows:
-# Right-click chrome-tab-limiter folder → Send to → Compressed (zipped) folder
+tools/package.sh
 ```
 
-### To Install from ZIP:
-1. Extract the ZIP file anywhere on your computer
+This copies only the files the extension runs (the manifest, the scripts, the
+pages, the stylesheets, `LICENSE` and the three PNG icons) into a clean temporary
+folder, checks that every file those scripts and pages refer to is included,
+zips it to `dist/tab-limiter-<version>.zip`, refuses to finish if the archive
+holds a dotfile, editor recovery file, key or `.crx`, and prints the contents.
+
+**Read the printed list before you share the archive.** If you add a runtime file
+to the extension, add it to the `files` list in `tools/package.sh`; the script
+stops with an error if a script or page refers to a file that is not listed.
+
+### To install from the ZIP
+1. Extract the ZIP into a new, empty folder
 2. Open `chrome://extensions/`
 3. Enable "Developer mode"
 4. Click "Load unpacked"
 5. Select the extracted folder
 
-### Benefits:
-- ✅ Simple and quick
-- ✅ Easy to backup
-- ✅ Can email to yourself
-- ✅ Works on any computer
+---
+
+## Method 2: CRX package
+
+A `.crx` is Chrome's single-file extension format. Pack the **extracted ZIP
+folder from Method 1**, never the working folder.
+
+1. Run `tools/package.sh` and extract the ZIP into a new, empty folder
+2. Open `chrome://extensions/` and enable "Developer mode"
+3. Click "Pack extension", select the extracted folder, and leave "Private key
+   file" empty the first time
+4. Click "Pack Extension"
+
+This creates `<folder>.crx` and `<folder>.pem` next to the folder.
+
+- The **`.pem` is your signing key.** Anyone who has it can publish an extension
+  that Chrome treats as yours. Store it somewhere private. Never put it in a
+  backup archive, an email or a shared folder.
+- Modern Chrome restricts installing a `.crx` directly. Loading the extracted
+  folder with "Load unpacked" (Method 1) is simpler and works everywhere.
 
 ---
 
-## Method 2: Create CRX Package (More Professional)
+## Method 3: Install script (convenient)
 
-A .crx file is Chrome's extension format. This is useful if you want a single file to install.
+An install script only needs the extracted ZIP from Method 1.
 
-### Steps:
-
-#### Option A: Using Chrome (Creates unsigned CRX)
-1. Open `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Pack extension"
-4. Browse to your `chrome-tab-limiter` folder
-5. Leave "Private key file" empty (first time)
-6. Click "Pack Extension"
-
-This creates:
-- `chrome-tab-limiter.crx` - The packaged extension
-- `chrome-tab-limiter.pem` - Private key (KEEP THIS SAFE!)
-
-#### Option B: Using Command Line
-```bash
-# On macOS/Linux:
-cd /path/to/extensions/directory
-google-chrome --pack-extension=chrome-tab-limiter
-
-# On Windows:
-cd C:\path\to\extensions\directory
-chrome.exe --pack-extension=chrome-tab-limiter
-```
-
-### To Install CRX:
-**Note**: Modern Chrome restricts installing CRX files directly for security. You have two options:
-
-1. **Use Developer Mode** (Recommended):
-   - Just use Method 1 (Load unpacked) - it's simpler!
-
-2. **Install via Drag & Drop** (May not work on newer Chrome):
-   - Open `chrome://extensions/`
-   - Drag the .crx file onto the page
-   - Click "Add extension"
-
----
-
-## Method 3: Create Install Script (Convenient)
-
-Create a simple install script for quick setup on new machines.
-
-### Create `install.sh` (Mac/Linux):
+### `install.sh` (Mac/Linux), placed next to the ZIP
 ```bash
 #!/bin/bash
 echo "Installing Chrome Tab Limiter..."
 
-# Check if Chrome is installed
-if [ -d "/Applications/Google Chrome.app" ] || command -v google-chrome &> /dev/null; then
-    echo "✓ Chrome detected"
-else
-    echo "✗ Chrome not found. Please install Chrome first."
+zip_file="$(ls tab-limiter-*.zip 2>/dev/null | head -n 1)"
+if [ -z "$zip_file" ]; then
+    echo "✗ No tab-limiter-*.zip found next to this script."
     exit 1
 fi
 
-# Extract if needed
-if [ -f "chrome-tab-limiter.zip" ]; then
-    echo "Extracting extension..."
-    unzip -q chrome-tab-limiter.zip
-fi
+rm -rf tab-limiter-extension
+mkdir tab-limiter-extension
+unzip -q "$zip_file" -d tab-limiter-extension
 
-# Check if extension directory exists
-if [ ! -d "chrome-tab-limiter" ]; then
-    echo "✗ Extension folder not found!"
-    exit 1
-fi
-
-echo "✓ Extension ready to install"
+echo "✓ Extension extracted"
 echo ""
 echo "Next steps:"
 echo "1. Open Chrome and go to: chrome://extensions/"
 echo "2. Enable 'Developer mode'"
 echo "3. Click 'Load unpacked'"
-echo "4. Select this folder: $(pwd)/chrome-tab-limiter"
-echo ""
-echo "Opening Chrome extensions page..."
+echo "4. Select this folder: $(pwd)/tab-limiter-extension"
 
-# Open Chrome extensions page
 if [[ "$OSTYPE" == "darwin"* ]]; then
     open -a "Google Chrome" "chrome://extensions/"
 else
@@ -120,35 +87,30 @@ else
 fi
 ```
 
-### Create `install.bat` (Windows):
+### `install.bat` (Windows), placed next to the ZIP
 ```batch
 @echo off
 echo Installing Chrome Tab Limiter...
 
-:: Check if extension exists
-if not exist "chrome-tab-limiter" (
-    if exist "chrome-tab-limiter.zip" (
-        echo Extracting extension...
-        powershell -command "Expand-Archive -Path 'chrome-tab-limiter.zip' -DestinationPath '.'"
-    ) else (
-        echo Error: Extension folder not found!
-        pause
-        exit /b 1
-    )
+for %%f in (tab-limiter-*.zip) do set ZIPFILE=%%f
+if not defined ZIPFILE (
+    echo Error: no tab-limiter-*.zip found next to this script.
+    pause
+    exit /b 1
 )
 
+if exist tab-limiter-extension rmdir /s /q tab-limiter-extension
+powershell -command "Expand-Archive -Path '%ZIPFILE%' -DestinationPath 'tab-limiter-extension'"
+
 echo.
-echo Extension ready to install!
-echo.
-echo Next steps:
-echo 1. Chrome will open to extensions page
+echo Extension extracted. Next steps:
+echo 1. Chrome will open to the extensions page
 echo 2. Enable 'Developer mode' (top right)
 echo 3. Click 'Load unpacked'
-echo 4. Select folder: %cd%\chrome-tab-limiter
+echo 4. Select folder: %cd%\tab-limiter-extension
 echo.
 pause
 
-:: Open Chrome extensions page
 start chrome "chrome://extensions/"
 ```
 
@@ -156,74 +118,42 @@ start chrome "chrome://extensions/"
 
 ## Backup Strategy
 
-### What to Backup:
-```
-chrome-tab-limiter/
-├── All source files (*.html, *.js, *.css)
-├── manifest.json
-├── icons/
-└── utils/
+### What to back up
+- The **repository** itself (source, tests, documentation) with git, for example
+  `git bundle create tab-limiter.bundle --all`, which contains only tracked files
+- `dist/tab-limiter-<version>.zip` from `tools/package.sh`
+- Your exported settings file (`tab-limiter-settings.json`), if you want it
 
-PLUS (optional):
-├── README.md
-└── Your exported settings JSON files
+### What never goes into a backup or a shared archive
+- `*.pem` signing keys: keep them in a separate, protected place
+- Editor recovery files (`*.swp`, `*~`) and `.DS_Store`
+- Anything you did not list on purpose
 
-NEVER include:
-└── chrome-tab-limiter.pem  (the CRX signing key; keep it somewhere private)
-```
-
-The signing key proves that an update comes from you. Anyone holding it can
-publish an extension that Chrome treats as yours, so it must not end up in a
-backup ZIP, an email, or a shared folder.
-
-### Simple Backup Script:
-```bash
-#!/bin/bash
-# backup.sh
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_NAME="tab-limiter-backup-${DATE}.zip"
-
-echo "Creating backup: ${BACKUP_NAME}"
-zip -r "${BACKUP_NAME}" chrome-tab-limiter/ README.md -x "*.pem" "*/*.pem" 2>/dev/null
-
-echo "✓ Backup created: ${BACKUP_NAME}"
-echo "  Size: $(du -h ${BACKUP_NAME} | cut -f1)"
-```
+Do not back up by zipping the working folder. `.gitignore` already keeps these
+files out of the repository, but it does not protect a plain `zip -r`.
 
 ---
 
-## Quick Distribution Package
+## Quick distribution package
 
-If you want everything in one package for easy reinstall:
-
-### Create Complete Package:
 ```bash
-# Create distribution folder
-mkdir tab-limiter-dist
-cp -r chrome-tab-limiter tab-limiter-dist/
-cp README.md tab-limiter-dist/
-cp install.sh tab-limiter-dist/  # or install.bat for Windows
-
-# Create archive
-zip -r tab-limiter-complete.zip tab-limiter-dist/
-
-# Clean up
-rm -rf tab-limiter-dist
+tools/package.sh                      # builds dist/tab-limiter-<version>.zip
+cp dist/tab-limiter-*.zip tab-limiter-dist/   # plus install.sh or install.bat
 ```
 
-Now you have a single ZIP with everything needed:
-- The extension
-- Documentation  
-- Install script
+Put the ZIP and one install script in a new folder and archive that folder. It
+contains only what you placed there.
 
 ---
 
 ## Tips
 
-1. **Keep the PEM file safe, and out of backups and shared archives,** if you create a CRX - it's your signing key
-2. **Version your backups** with dates in filenames
+1. **Keep the PEM file safe, and out of backups and shared archives,** if you
+   create a CRX - it's your signing key
+2. **Version your backups** with the version in the file name (the script does)
 3. **Test the package** on a different Chrome profile before relying on it
 4. **Export your settings** regularly using the extension's export feature
-5. **Use cloud storage** (Google Drive, Dropbox) for automatic backup
+5. **List the archive** (`unzip -l`) before you share it, every time
 
-For personal use, Method 1 (ZIP file) is usually the best - it's simple, reliable, and works everywhere!
+For personal use, Method 1 (the ZIP) is usually the best: it is simple, reliable
+and works everywhere.

@@ -171,14 +171,13 @@ checklist in `REVIEW.md`.
 
 ## Permissions
 
-The extension asks for four permissions and no host access:
+The extension asks for three permissions and no host access:
 
-- **`tabs`**: lets it read each tab's `url`, `title`, favicon and group, which Chrome withholds without this permission. It uses them to count tabs and to show you which tab to close. This permission also lets the extension see the URL of every open tab, so it is the most sensitive one. Nothing is sent anywhere (see Privacy), and tab URLs and titles are never written to storage.
+- **`tabs`**: lets it read each tab's `title`, `url` and group, which Chrome withholds without this permission. It uses titles and groups to count tabs and to show you which tab to close; it does not use the URL. The permission does let the extension see the URL of every open tab, so it is the most sensitive one. Nothing is sent anywhere (see Privacy), and tab URLs and titles are never written to storage.
 - **`storage`**: saves your limits locally.
-- **`windows`**: tells windows apart and notices when one closes, so its saved limits can be cleaned up.
 - **`tabGroups`**: reads tab group names and colors so groups can have their own limits.
 
-Requires Chrome 127 or later.
+Window handling (telling windows apart, noticing when one closes) needs no permission of its own. Requires Chrome 127 or later.
 
 ## Privacy
 
@@ -189,7 +188,7 @@ This extension:
 - Stores your tab-limit settings in `chrome.storage.local` (not synced to your Google account), and the decisions in progress as IDs and counts in memory-only `chrome.storage.session` (see Storage Structure)
 - Does not remember or reopen the address of a tab it closed
 - Requests no host, history, cookie, or web-request permissions and injects no content scripts
-- Exports settings only when you ask, as a local JSON file with window/group IDs anonymized
+- Exports settings only when you ask, as a local JSON file named `tab-limiter-settings.json`. It holds your limits, how many you set, the extension version and numbered labels (`window_1`, `group_1`) that show which group limits share a window. It has no real window or group IDs, titles, URLs or dates.
 
 ## License
 

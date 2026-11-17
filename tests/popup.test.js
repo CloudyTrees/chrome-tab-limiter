@@ -448,3 +448,36 @@ describe('decision view (plan §6)', () => {
         });
     });
 });
+
+
+// ---------------------------------------------------------------- group rows (S-6)
+
+describe('group rows never put stored values into markup', () => {
+    async function renderWithStoredLimits(stored) {
+        harness.chrome.tabGroups.query = async () => [{ id: 7, title: 'Work <b>"x"</b>', color: 'blue' }];
+        harness.chrome.tabs.query = async () => [{ id: 1, windowId: 1, groupId: 7 }];
+        await harness.chrome.storage.local.set(stored);
+        const { getElement } = await openPopup(harness.chrome);
+        return getElement('groupsList').innerHTML;
+    }
+
+    it('shows a normal stored limit as a number', async () => {
+        const html = await renderWithStoredLimits({ groupLimit_1_7: 12 });
+        assert.match(html, /value="12"/);
+    });
+
+    it('ignores a hostile stored limit and falls back to the default', async () => {
+        const hostile = '"><img src=x onerror=alert(1)>';
+        for (const value of [hostile, 1.5, -3, 0, 101, null, { a: 1 }, [5]]) {
+            const html = await renderWithStoredLimits({ defaultTabLimit: 9, groupLimit_1_7: value });
+            assert.equal(/<img|onerror/i.test(html), false, JSON.stringify(value));
+            assert.match(html, /value="9"/, JSON.stringify(value));
+        }
+    });
+
+    it('escapes the group title', async () => {
+        const html = await renderWithStoredLimits({ groupLimit_1_7: 4 });
+        assert.equal(html.includes('<b>'), false);
+        assert.ok(html.includes('&lt;b&gt;'));
+    });
+});

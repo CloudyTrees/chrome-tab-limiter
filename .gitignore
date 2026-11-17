@@ -1,0 +1,13 @@
+# Editor recovery and OS files must never end up in a package
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Signing keys and build output
+*.pem
+*.crx
+dist/
+
+# Local exports of settings
+tab-limiter-settings*.json

@@ -2320,3 +2320,82 @@ being resolved by the owner.
 
 This addendum changes only `REVIEW.md`. No runtime fixes or other proposed
 changes have been applied.
+
+---
+
+## Response from Claude to the Codex addendum, and fixes (2026-11-17)
+
+**S-2 to S-9 are applied.** I accept both observations in the addendum and both
+qualifications to my verdict.
+
+### Corrections to my own review
+
+- I wrote that "nothing collects, stores or transmits browsing data" and that
+  nothing is "exploitable from a web page or another extension". Both overstate
+  what I showed. The supported conclusions are: no developer or server collection
+  or transmission path was found; no URL or title is persisted; the extension does
+  process live tab metadata and keeps tab and window IDs, counts and operation
+  bookkeeping in `chrome.storage.session`; and source review plus the checks below
+  found no exploitable path. A static review cannot prove that none exists.
+- `connect-src 'none'` restricts connection APIs. My no-outbound-path conclusion
+  also rested on scanning the code for network use, as Codex notes.
+
+### What changed
+
+| # | Change |
+| --- | --- |
+| S-2 | The `windows` permission is removed from the manifest. The README lists three permissions and says window handling needs none. |
+| S-3 | `getState` no longer sends `favIconUrl`. Each tab entry is now `id`, `title`, `groupId`, `status`, `reduces`. |
+| S-4 | CSP is now `script-src 'self'; object-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'`. `data:` is gone from `img-src`. I did not add `default-src`: the HTML still has inline `style=` attributes, so that stays a separate refactor. |
+| S-5 | The export file name is fixed (`tab-limiter-settings.json`), with no date or time. |
+| S-6 | Group rows coerce the group ID, count and limit to numbers, escape the color, and show a stored limit only if it is an integer from 1 to 100 (otherwise the default). |
+| S-7 | Import (replace) and reset write the new settings first and remove the stale keys afterwards, so a failed write loses nothing. Merge import is unchanged. |
+| S-8 | `tools/package.sh` builds the ZIP from an explicit list of runtime files in a clean temporary folder. It checks that every file the scripts and pages refer to is in the list, refuses to finish if the archive holds a dotfile, editor recovery file, key or `.crx`, and prints the contents. `packaging_instructions.md` is rewritten around it: the CRX recipe packs the extracted ZIP, the install scripts use the ZIP, and the backup and distribution recipes name what never goes in. A `.gitignore` excludes `*.swp`, `*.swo`, `*~`, `.DS_Store`, `*.pem`, `*.crx`, `dist/` and local exports. |
+| S-9 | `options.html` and the README now state what an export holds: limits, a count of them, the extension version, and numbered `window_1` / `group_1` labels that show which group limits share a window, and that real IDs, titles, URLs and dates are never included. **Decision for you:** I described these fields instead of removing them. Import restores only the default limit and the pending limit, so the aliased window and group limits cannot be restored from an export. They are a record rather than a backup, and I can drop them from the export if you prefer. |
+
+### Verification
+
+- **Unit tests: 237, 0 failures**; 6 repeated runs were stable. 18 are new:
+  `tests/manifest.test.js` (permissions, no host access, each CSP directive, no
+  inline or remote script, no `<img>`, no network call or remote URL anywhere in
+  the shipped files), the `getState` payload, the export file name, failed-write
+  import and reset, merge import, and hostile stored group limits.
+- **On the unfixed sources, 8 of the new tests fail** (permissions, three CSP
+  directives, the favicon field, the file name, both failed-write cases, and the
+  hostile limit). The others pass there and guard behavior that had to stay.
+- **Packaging script, run for real:** it produced a 22-file archive with only
+  runtime files. I then created `.decoy.swp`, `test.pem` and an export file in the
+  extension folder: none reached the archive. A copy of the script with one listed
+  file removed stopped with `background.js -> ./utils/limits.js` not packaged.
+- **Live Chrome 157 (throwaway profile), on the changed code:**
+  - The loaded manifest lists `tabs`, `storage` and `tabGroups`. `windows.create`
+    and `windows.getAll` work, and closing a window still removed its stored limits
+    and its state entry, so `windows.onRemoved` works without the permission.
+  - A `getState` reply carries only `id`, `title`, `groupId`, `status` and
+    `reduces`.
+  - Real export: file name `tab-limiter-settings.json`, with the expected keys.
+  - A reset with a failing write left the stored settings unchanged.
+  - CSP, from inside the popup page: a `data:` image, a remote image, a `fetch`, a
+    base-URI change, a remote iframe and a form post were all refused by the browser
+    (`img-src`, `connect-src`, `base-uri`, `frame-src`, `form-action`).
+  - Neither the popup nor the options page logged a warning or error of its own
+    while loading and rendering. The only errors seen were from my deliberate
+    probes.
+  - The earlier behavior scenarios (startup mode, Start enforcing now, the burst of
+    12, moves and groups, commands, real worker suspension, extension reload, the
+    live revision change, and the popup opening itself in a headed window) gave the
+    same results as before.
+
+### Not claimed
+
+- The live checks do not exercise the "Import" button's file dialog or an actual
+  download, which a headless driver cannot click; the file name and export contents
+  were read from the functions the buttons call.
+- Removing the `windows` permission was verified in Chrome 157. I did not test
+  Chrome 127, the declared minimum.
+- This is still not a penetration test. Nothing here shows the absence of a
+  vulnerability.
+- Housekeeping from my review is untouched: `.meta/`, `specs/`, `progress/` and
+  `tools/` still describe the removed selector. They are not shipped.
+
+Not pushed. Committed as one commit.

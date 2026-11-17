@@ -974,7 +974,6 @@ async function cmdGetState(request) {
             return {
                 id: tab.id,
                 title: tab.title || '',
-                favIconUrl: tab.favIconUrl || '',
                 groupId,
                 status: statusOf(tab.id),
                 reduces

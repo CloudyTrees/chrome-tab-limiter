@@ -6,8 +6,7 @@
   "description": "Limit the number of open tabs per window. Requires tab access to count and manage tabs. All data stored locally only.",
   "permissions": [
     "tabs",
-    "storage", 
-    "windows",
+    "storage",
     "tabGroups"
   ],
   "background": {
@@ -33,7 +32,7 @@
     "open_in_tab": true
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data:; connect-src 'none';"
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';"
   }
 }
 
