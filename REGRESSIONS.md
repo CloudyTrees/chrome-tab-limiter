@@ -535,3 +535,145 @@ handler resolves it straight away if the new limits fit.
 - The earlier limits stand: session restore and extension reload were emulated.
 
 Not pushed. Committed as one commit, as requested.
+
+---
+
+## Codex verification of the second fix round (2026-11-17)
+
+Reviewed commit `d3cb804bb424a17ed9858d344cec58eb5225c429` on `sh-dev`.
+Source locations in this section refer to that revision.
+
+**Verdict: the four previous follow-up reproductions now pass, but two
+interaction failures remain. Do not sign off yet.** The fixes address the
+reported sequences for REG-01a, REG-02a, REG-04a and REG-04b. Combining movement
+with replacement still permits an automatic closure, and the settings fallback
+can repeatedly exceed the pending cap without a later reconciliation fixing it.
+
+### Verification performed
+
+- Confirmed the reviewed commit and a clean working tree.
+- Ran the complete repository suite: **211 passed, 0 failed, 50 suites**.
+- Re-ran the same four independent probes from the preceding Codex review
+  against a temporary copy of the fixed source. **All four passed**:
+  - The tab moved out and back remained open, with no removal attempted.
+  - Navigation of an unselected tab caused the close command to fail as stale,
+    leaving the selected tab open.
+  - Raising the limit from 3 to 4 advanced the operation revision from 6 to 7,
+    and the popup push carried revision 7.
+  - Raising the limit to 100 during admission kept the new tab, leaving nine
+    tabs rather than eight.
+- Independently checked Claude's 13 new tests against the previous
+  `background.js` from `098d88f`, in the temporary copy only: **9 failed and 4
+  controls passed**, matching Claude's report. Restored the fixed source in that
+  copy afterward.
+- Added and ran two interaction probes in the temporary copy. Both failed
+  their expected-behavior assertions, as detailed below.
+- Verified that HEAD and all tracked repository file hashes remained unchanged
+  after investigation. This subsequent documentation update adds no runtime or
+  test changes.
+
+All reproduction setup is as before: window 1 has ordinary tabs 1, 2 and 3 at
+limit 3; window 2 has tab 10; no overrides initially; startup mode is ended with
+`startEnforcing`; the pending cap is 5. Open five pending tabs sequentially and
+drain events after each, bringing window 1 to eight tabs. Each probe imports a
+fresh background module and uses the existing Chrome mock.
+
+### REG-01b — Replacement can erase movement protection during rejection
+
+**Locations:** `chrome-tab-limiter/background.js:465–469,504–512,1016–1023`.
+
+1. With the pending cap full, open another new tab in window 1.
+2. Wrap `tabs.get` for that ID, counting only calls for that ID.
+3. On its third call, the final rejection lookup, move the tab from window 1 to
+   window 2 and back, then call `harness.replaceTab(oldId, 2000)`.
+4. Await `flush(1)` so the movement and replacement events are delivered before
+   returning the real lookup. The lookup of the old ID fails, and `currentTab`
+   follows the replacement map to ID 2000.
+5. Let the task and queued events finish.
+
+**Observed:** Replacement tab 2000 is automatically closed. The probe recorded
+`removeAttempts: [2000]` and `rejectedCount: 1`.
+
+**Expected:** The replacement must inherit the moved tab's protection. It should
+remain open and be reconciled as moved, with no automatic rejection.
+
+The admission task captures `chain = [originalId, tabId]` before the final
+lookup; in this probe both entries hold the old ID. The synchronous replacement
+listener transfers the movement marker to ID 2000 and deletes it from the old
+ID. `currentTab` correctly returns the replacement, but `movedSince(chain, ...)`
+checks only the old IDs and misses that marker. Current membership matches the
+original window and group, so the replacement is removed.
+
+This is not the acknowledged unavoidable gap between a final check and Chrome
+executing a removal: every relevant event has arrived before the final guard
+evaluates. The guard checks movement against the wrong identity.
+
+**Fix direction:** Preserve movement invalidation across the entire replacement
+chain, including the ID returned by the last lookup. Use a stable admission
+record or otherwise ensure migrating an event marker cannot make an in-flight
+guard forget it. Test the combined move-plus-replacement sequence, not only
+movement and replacement separately.
+
+### REG-04c — The settings fallback can repeatedly exceed the pending cap
+
+**Locations:** `chrome-tab-limiter/background.js:504–521,1031–1035`;
+settings reconciliation at `670–693`.
+
+1. With window 1's five pending slots full, open the next new tab there.
+2. On that tab's third `tabs.get`, immediately before the rejection's last
+   lookup returns, set `tabLimit_2: 4`. This changes window 2 only; window 1's
+   applicable limits and cap stay unchanged.
+3. Await `flush(1)` to deliver the settings event, then return the real lookup.
+4. Drain the queue completely and query window 1 with `getState`.
+5. Repeat with two more new tabs, setting `tabLimit_2` to 5 and then 6 at the
+   same point. Restore the previous lookup wrapper between iterations.
+
+**Observed after each fully reconciled iteration:**
+
+| Window 2 setting | Window 1 tabs | Window 1 pending | Rejected count |
+| --- | --- | --- | --- |
+| `tabLimit_2: 4` | 9 | 6 | 0 |
+| `tabLimit_2: 5` | 10 | 7 | 0 |
+| `tabLimit_2: 6` | 11 | 8 | 0 |
+
+Every new tab remained open. The pending cap stayed 5 and window 1's default
+limit stayed 3 throughout.
+
+**Expected:** An unrelated window's limit change must not disable enforcement
+in window 1. Its pending cap should remain enforced, with these additional new
+tabs rejected under its unchanged rules.
+
+`settingsSeq` is global, so any recognized limit change invalidates the
+rejection. If the tab is still in place, the fallback appends it directly to
+`win.pending` without checking the cap or whether that setting affected the
+window. The queued settings handler reconciles excess and revisions but does
+not re-run admission or remove the extra pending entry. Thus the excess pending
+count persists after all work completes and can grow again on later creations.
+
+This corrects the preceding response's description of a brief overshoot by one.
+The reproduced behavior is persistent and repeatable. It also contradicts the
+cap-only rule in `HUMAN-DECISION.md`; the tab is newly admitted beyond the cap,
+not an already-pending tab protected after a cap reduction.
+
+**Fix direction:** Track settings invalidation by the scopes that affect the
+admission. When relevant settings really do change, defer or retry the
+undecided admission under the current rules rather than unconditionally adding
+a pending entry beyond the cap. Give any deferred admission an explicit owner
+so it is eventually classified exactly once. Preserve the prohibition on
+closing tabs that were already pending merely because the cap was lowered.
+
+### Acceptance and verification limits
+
+Add regression coverage and fixes for REG-01b and REG-04c before sign-off. The
+previous four follow-up cases now pass; this section does not retract that
+result. The remaining failures concern interactions the passing suite does not
+cover.
+
+These two findings are deterministic mock reproductions, **not live Chrome
+reproductions**. Codex did not independently repeat Claude's live browser tests.
+Earlier limitations concerning emulated session restore and extension reload
+still apply. No new data-collection or external security exploit is claimed by
+these correctness findings.
+
+Only this review document is changed and committed by Codex. No source fixes,
+test changes, push or merge are included.
