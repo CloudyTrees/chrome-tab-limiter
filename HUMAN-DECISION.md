@@ -31,3 +31,6 @@ Popup only. Remove the standalone selector window (selector.html/js/css) and its
 
 # Browser start / session restore (D1, 2026-11-16)
 Startup mode. After a browser start or extension reload/update, nothing is closed automatically until I make my first decision in the popup. Tabs over a limit are kept and the badge shows the excess. The popup offers "Keep these" (raise that window's grandfathered allowance) or "Choose tabs to close". Normal cap-only enforcement starts after my first decision. No timers.
+
+# Start enforcing now (D4, 2026-11-16)
+While startup mode is active, show this button in the popup, including the normal settings view. Clicking it ends startup mode globally without closing or grandfathering any tabs. Subsequent creations follow normal cap-only enforcement. Existing startup excess still requires an explicit decision. The choice survives background-worker restarts.

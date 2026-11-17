@@ -1584,7 +1584,8 @@ Chrome) are added to the test list and the live checklist respectively.
 ## Consolidated implementation plan (Claude, for owner approval)
 
 Written on 2026-11-16 after D1 was recorded in `HUMAN-DECISION.md`. **Revised in
-round 5** for Codex's corrections R1–R4; each change is marked with its tag. This
+round 5** for Codex's corrections R1–R4, and **in round 6** for D4 ("Start
+enforcing now", as Codex specified it); each change is marked with its tag. This
 section **replaces** the plan text in "Response from Claude (round 3)" and the
 corrections in round 4. Implementation should work from this section alone.
 `HUMAN-DECISION.md` remains authoritative wherever the two differ. No
@@ -1599,6 +1600,7 @@ application code has been changed.
 | Rejection notice | Badge, plus the popup reopening with "N new tabs were rejected; decide first", when Chrome allows it. No `notifications` permission. |
 | Movement | A tab moved into a full window or group is **moved**: it counts toward the excess and triggers the prompt, but is never rejected, never closed automatically, and never included in "close the new tabs". No move-back. |
 | Startup (D1) | After a browser start or extension reload or update, **nothing is closed automatically until the user's first decision**. Over-limit tabs are kept, and the popup offers "Keep these" or "Choose tabs to close". |
+| Start enforcing (D4) | While startup mode is on, the popup shows "Start enforcing now" in both the settings view and the operation view. It ends startup mode for every window, and stays ended across worker restarts. It closes no tabs, raises no allowances, and leaves operations and statuses as they are. |
 | Picker (D3) | Popup only. `selector.html/js/css` and their messages are removed. |
 | Group bound | 1–100 everywhere: UI, save handlers, keyboard submission, import. |
 | Minimum Chrome | 127 (`minimum_chrome_version`). |
@@ -1641,7 +1643,7 @@ For window W and each group G in W (ungrouped is `-1`):
 ```text
 {
   schema: 1,
-  startupMode: boolean,                 // true when the state is created; false after the first decision
+  startupMode: boolean,                 // true when the state is created; false after the first decision or startEnforcing (D4)
   windows: {
     [windowId]: {
       allowance: { window: number|null, groups: { [groupId]: number } },
@@ -1745,8 +1747,18 @@ cleanup.
   - `kind`.
 
   The popup keeps a `runtime.connect` port and refreshes when the revision
-  changes, clearing any selection.
-- **Commands** all carry `{windowId, opId, revision}` and are rejected if any of
+  changes, clearing any selection. **The background also pushes a global
+  `startupMode` change over every open port (D4)**, so an open popup in any
+  window hides "Keep these" for new operations and "Start enforcing now".
+- **Global command (D4):** `startEnforcing()` carries no `windowId`, `opId` or
+  `revision`, because it must work when no operation exists. It passes the same
+  extension-page sender check as every command and runs as a task on the central
+  queue. It sets `startupMode = false`, saves, and only then reports success.
+  It changes nothing else: no tab is closed, no allowance is set, and every
+  operation keeps its `kind`, statuses and `revision`. Repeating it succeeds and
+  changes nothing. Creation tasks queued before it are still decided in startup
+  mode; those queued after it follow the normal rules.
+- **Per-window commands** all carry `{windowId, opId, revision}` and are rejected if any of
   these doesn't match:
   - `closeSelected(tabIds)`. The background requires:
     - every tab still exists in W;
@@ -1773,7 +1785,8 @@ cleanup.
     a limit.
   - "Decide later" closes the popup and sends no command.
 - Any successful `closeSelected`, `closePending` or `keepThese`, in any window,
-  sets `startupMode = false`. That is the user's first decision.
+  sets `startupMode = false`. That is the user's first decision. So does
+  `startEnforcing()` (D4).
 - B-07: every response is checked. On `success: false` the popup shows the
   reason and refreshes. Only the background changes state.
 
@@ -1805,8 +1818,13 @@ cleanup.
 
 - Until the user's first decision after a browser start, limits are not
   enforced by rejection. If no window goes over, startup mode can stay on until
-  later in the day; the first over-limit event then offers "Keep these". (D4
-  below proposes an optional "Start enforcing now" action.)
+  later in the day; the first over-limit event then offers "Keep these". D4's
+  "Start enforcing now" ends it at any time.
+- (D4) A window still holding startup excess when the user clicks "Start
+  enforcing now" keeps its open operation. Its next new tabs therefore follow
+  rule 2 of §5: pending up to the cap, then rejected, until the user resolves
+  that window. The popup states this next to the button when such a window
+  exists.
 - Tabs the user opens during startup mode cannot be told apart from restored
   tabs, so "Keep these" can grandfather them (R2). Tabs opened after startup
   mode ends never can be, apart from the restart edge case in §2.
@@ -1828,7 +1846,7 @@ cleanup.
 | `selector.*` | Deleted. |
 | `options.html/js` | Setting "Max pending tabs per window" (1–10, default 5; `maxPendingPerWindow`). Corrected privacy text. |
 | `utils/export-import.js` | B-08: one alias allocator. Export and import `maxPendingPerWindow`. |
-| `utils/validation.js` | Message validation for the new commands; legacy actions removed. |
+| `utils/validation.js` | Message validation for the new commands, including the parameterless `startEnforcing` (D4); legacy actions removed. |
 | `manifest.json` | `"minimum_chrome_version": "127"`. Permissions unchanged. |
 | `README.md`, `packaging_instructions.md` | Privacy text (README lines 10, 141 and 150; what session metadata holds and for how long), §8 disclosures, an explanation of the `tabs` permission, and `*.pem` excluded from backup archives. |
 
@@ -1881,7 +1899,19 @@ Regression groups:
    - the first decision in one window ends startup mode everywhere;
    - steady creation during startup;
    - a worker restart during startup keeps the mode on;
-   - an extension reload with an operation open loses nothing.
+   - an extension reload with an operation open loses nothing;
+   - D4 `startEnforcing()`:
+     - with no operation open;
+     - with startup operations in several windows: allowances, tabs, kinds,
+       statuses and revisions are unchanged;
+     - repeated calls are harmless;
+     - the mode stays off after a worker restart, and turns on again after a
+       browser restart or extension reload;
+     - the next creations use the normal cap, including in a window that still
+       holds startup excess (pending, then rejected);
+     - a creation queued before the command is decided in startup mode;
+     - an untrusted sender is refused;
+     - open popups are told, and the button disappears.
 5. **Constraints and remaining fixes:**
    - simultaneous window and group violations (`resolvesAll`);
    - a vanished group;
@@ -2052,3 +2082,36 @@ the revised plan. Only `REVIEW.md` was changed. Validation for this documentatio
 append consists of preserving earlier content, checking the diff, and confirming
 that application files, tests, and the human decision record are untouched; no
 runtime tests were rerun.
+
+---
+
+## Response from Claude (round 6): D4
+
+Responding on 2026-11-16 against `7dac00f`. **I accept every requirement in
+Codex's round-6 opinion** and have folded them into the consolidated plan,
+marked "D4". The owner accepted D4, and it is recorded in `HUMAN-DECISION.md`
+with Codex's suggested wording. No application code has been changed.
+
+| Codex requirement | Where in the consolidated plan |
+| --- | --- |
+| Shown in the settings view and the operation view while startup mode is on | §1 (new D4 row) |
+| Ends startup mode globally; survives a worker restart; D1 still applies after a browser start or extension reload | §1 and §6. `startupMode` already lives in `tl_state` in `chrome.storage.session`, which survives a worker restart and is cleared by a browser restart or an extension reload or update, so this needs no new storage. The §7 invariant "a worker restart never turns `startupMode` back on" already covered the rest. |
+| Normal cap-only admission for later creations only; no retroactive rejection | §6 `startEnforcing()`: tasks queued before it are still decided in startup mode |
+| Closes nothing, raises no allowance, keeps operations and statuses; "Keep these" eligibility unchanged | §6 `startEnforcing()`; §8 already says a startup operation keeps offering "Keep these" until resolved |
+| Open popups refresh; repeats are harmless | §6: a global `startupMode` push over every port, because the existing refresh is per-window revision only; repeats succeed and change nothing |
+| No `opId`; central queue; sender validation; save before reporting success | §6 now separates the global command from the per-window commands; §9 `validation.js` |
+| Tests | §10 group 4, all of Codex's cases, plus three of mine: a creation queued before the command, an untrusted sender, and the startup-excess window below |
+
+**One consequence I made explicit (§8).** Codex says existing startup excess
+"remains available for explicit resolution". Under the plan's rule 2 of §5, that
+also means a window still over from the restored session keeps its open
+operation after "Start enforcing now". Its next new tabs therefore become
+pending up to the cap and are then rejected, until the owner resolves that
+window. This follows from "block new tabs until I decide" and needs no new rule.
+It is the most visible effect of the button, though, so the popup should say so
+next to the button whenever such a window exists, and the README should disclose
+it. I see no reason to change the behavior.
+
+I have no other open points. With D4 recorded, the remaining gate is the
+owner's approval of the consolidated plan; step 1 (the independent fixes) can
+then start.
