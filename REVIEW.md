@@ -2185,3 +2185,73 @@ correctly.
 
 Open items: none for the plan. Nothing has been pushed and the branch `sh-dev` has
 not been merged.
+
+---
+
+## Privacy and security review, second round (Claude, 2026-11-17)
+
+Reviewed commit `777b808` on `sh-dev`: the extension as implemented after the six
+plan steps and the regression fixes. A static read of every shipped file, targeted
+scans, and one live check in Chrome 157 (a throwaway profile, headless). No tracked
+file was changed by the review. S-1, a stray editor swap file in the packaged
+folder, was resolved by the owner before this was recorded, so the numbering starts
+at S-2.
+
+**Verdict.** Nothing collects, stores or transmits browsing data, and nothing is
+exploitable from a web page or another extension. Five low-severity hardening items
+and two informational notes remain.
+
+### Controls that held
+
+- **No network path.** The extension folder contains no `fetch`, `XMLHttpRequest`,
+  `WebSocket`, `sendBeacon`, `eval`, `new Function`, `importScripts` or
+  `setUninstallURL`, and no `http(s)` string in any script, page or stylesheet.
+  `connect-src 'none'` backs that up.
+- **No external entry points.** The manifest has no `externally_connectable`,
+  `web_accessible_resources` or content scripts, and the code registers no
+  external-message listeners. Only the extension's own pages can send messages or
+  open ports, and both paths check the sender.
+- **Message validation.** Every command is shape-checked: a positive integer
+  window ID, an operation ID of at most 64 characters, an integer revision, and up
+  to 1000 unique tab IDs. No code path reopens or recreates a URL.
+- **No URLs or titles persisted.** The only use of `url` is a "did it change" flag
+  on an event. `tl_state` and `storage.local` hold IDs, counts and numbers, and the
+  navigation tracking added for the regression fixes is counters only. A test
+  asserts that no URL appears in any stored state.
+- **No page-controlled text reaches `innerHTML`.** The decision view builds its DOM
+  with `textContent`. Errors shown to the user are static strings. Group titles are
+  escaped, and the import preview uses `textContent`.
+- **Logging.** All four debug flags are `false`. Error logs are fixed strings, with
+  no `error.message`, tab data or request contents.
+- **Import and export.** Import writes only two fixed keys, `defaultTabLimit` and
+  `maxPendingPerWindow`, both validated. Prototype-pollution keys are rejected and
+  files over 1 MB are refused. The export file has no date and anonymized IDs.
+- **Dev tooling and repository.** The Python tools make no network calls, only
+  `git --version` checks. Tracked files contain no secrets, keys, tokens, email
+  addresses, usernames or absolute paths.
+
+### Findings
+
+| # | Severity | Finding | Suggested change |
+| --- | --- | --- | --- |
+| S-2 | Low (least privilege) | The `windows` permission is unnecessary. A scratch copy without it, loaded in Chrome 157, still ran `windows.getAll`, `windows.create`, `windows.onRemoved` and read tab titles. The README lists it as if it were required. | Remove it from the manifest and from the README's permission list. |
+| S-3 | Low (data minimisation) | `getState` sends each tab's `favIconUrl` to the popup, which never uses it. It is a URL, sent only to our own page. | Stop sending it (`background.js`, `cmdGetState`). |
+| S-4 | Low (CSP) | The CSP sets only `script-src`, `object-src`, `img-src` and `connect-src`. There is no `base-uri`, `form-action` or `frame-src`, and `img-src` allows `data:` although no `data:` image is used. Not exploitable today, since nothing injects markup. | Drop `data:` from `img-src` and add `base-uri 'none'; form-action 'none'; frame-src 'none'`. A full `default-src` first needs the inline `style=` attributes in the HTML moved to classes. |
+| S-5 | Low (consistency) | `generateExportFilename()` embeds the date and time, while the file's content deliberately omits the date ("Privacy Protected"). The file system records the time anyway, so this is a consistency issue, not a leak. | Use a fixed name such as `tab-limiter-settings.json`. |
+| S-6 | Informational | `createGroupItemHTML` puts the stored group limit into a `value="…"` attribute unescaped. It is always an integer written by our own validated code. | Wrap it in `Number()` to make that explicit. |
+| S-7 | Informational (robustness) | Import clears `storage.local` and then writes. If the write failed, the settings would be lost. | Write first and then remove the stale keys, or keep a copy to restore on failure. |
+
+Housekeeping, not security: `.meta/`, `specs/`, `progress/` and `tools/` still
+describe the removed selector. They are not shipped. `icons/converter.html` and the
+`.svg` files do ship but are inert, and under the CSP `converter.html` has no script.
+
+### Limits of this review
+
+- A static read plus targeted scans, not a penetration test. The only live check was
+  the `windows` permission.
+- It covers the extension's own code only, not Chrome, its APIs or other installed
+  extensions.
+- The `tabs` permission remains the largest exposure by design. The extension can
+  see every tab's title and URL, and it uses only titles, groups and counts.
+- No change was made to the extension or to the other documents for this round.
+  The suggested changes above are proposals awaiting the owner's decision.
