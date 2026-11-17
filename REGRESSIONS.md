@@ -970,3 +970,84 @@ An untracked `chrome-tab-limiter/.background.js.swp` is still present; it is not
 part of this commit.
 
 Not pushed. Committed as one commit.
+
+---
+
+## Codex verification of the fourth fix round (2026-11-17)
+
+Reviewed commit `f86ac8af4322fd771bc0f124f6ddd8ce0393e481` on `sh-dev`.
+Source locations in this section refer to that revision.
+
+**Verdict: REG-04d is resolved for the verified sequences. No new reportable
+regression was found in this round.** The pending fallback is gone; exhausting
+the retry budget transfers ownership of the undecided tab to a queued follow-up
+without granting it an extra pending slot. All seven previous independent
+probes and four additional handoff probes passed.
+
+### Verification performed
+
+- Ran the complete repository suite: **219 passed, 0 failed, 53 suites**.
+- Re-ran the same seven independent probes retained from the preceding reviews
+  against a temporary snapshot. **All seven passed**, covering movement out and
+  back, navigation of an unselected tab, popup revision changes, settings changes
+  during admission, unrelated-window settings changes, movement combined with
+  replacement, and repeated retry exhaustion.
+- Independently checked the three current REG-04d tests against the previous
+  `background.js` from `9ea912e`, in the temporary copy only: **2 failed and 1
+  control passed**, matching Claude's report. Restored the fixed source afterward.
+- Ran four new deterministic handoff probes against the fixed source.
+  **All four passed**, as detailed below.
+- Confirmed that HEAD and all tracked repository file hashes remained unchanged
+  after investigation. The pre-existing untracked
+  `chrome-tab-limiter/.background.js.swp` was left untouched and is excluded
+  from the subsequent documentation commit.
+
+### REG-04d reproduction result
+
+The independent reproduction used the same alternating `tabLimit_1` values
+(3 and 4) on the final lookup of each of three attempts, for three successive
+creations at a full pending cap. Each creation was rejected exactly once after
+deferral. Window 1 stayed at **eight tabs and five pending**; its rejected count
+advanced to 1, 2 and 3. The following ordinary creation was also rejected,
+leaving the pending count at five. The previous accumulation to six, seven and
+eight pending did not recur.
+
+The relevant implementation is at `chrome-tab-limiter/background.js:449–451`
+(explicit follow-up owner), `486–490,524–528` (deferral on retry exhaustion),
+and `558–562` (cleanup preserves undecided ownership during handoff).
+
+### Additional handoff checks
+
+These probes use the existing mock and fresh background-module instances. As
+before, window 1 starts at limit 3 with three ordinary tabs, startup mode off,
+and five pending tabs. Settings writes and native events are delivered during
+awaited calls, before their queued handlers finish.
+
+| Scenario | Executed sequence and observed result |
+| --- | --- |
+| Two consecutive handoffs | Change `tabLimit_1` between 3 and 4 on six successive final-attempt lookups. Admission exhausts two budgets, then rejects the tab exactly once after settings settle. Pending stays 5, the picker count matches actual tabs, and a subsequent creation is also rejected normally. |
+| Replacement at handoff | On the third invalidating settings write, replace the original tab with ID 2000 before the lookup returns. The follow-up follows the replacement, removes ID 2000 exactly once, records one rejection and leaves five pending tabs. |
+| Movement and replacement while deferred | In the first queued settings handler's settings read, move the deferred tab to window 2 and back, then replace it with ID 2000 and deliver the events. The replacement remains open, is classified as moved, has no removal attempted, and does not consume another pending slot. The picker includes every actual tab. |
+| Removal while deferred | During that queued settings read, remove the deferred tab and deliver its removal event. The follow-up finishes without a second removal or a false rejection; five pending tabs remain and the picker count matches actual tabs. |
+
+These checks exercise ownership, replacement, movement protection and cleanup
+across the new queue handoff. Together with the passing earlier probes, they
+support closing the reported REG-04d failure and accepting the fix within this
+regression-review scope.
+
+### Scope and verification limits
+
+No remaining failure from the preceding reported reproductions was observed in
+this round. This result covers the reviewed patch and executed event sequences;
+it does not establish coverage of every possible event combination.
+
+The independent probes are deterministic mock tests, **not live Chrome
+reproductions**. Codex did not independently repeat Claude's browser tests.
+In particular, the deferred-admission path has no live-browser verification in
+this review, and earlier session-restore and extension-reload checks remain
+emulated. The acknowledged asynchronous interval between checking a tab and
+Chrome executing its removal remains. URL-based navigation invalidation does
+not detect form edits or content changes without a URL event.
+
+Only this review document is committed by Codex. No runtime fixes, test changes,
+push or merge are included; the existing untracked swap file remains excluded.
