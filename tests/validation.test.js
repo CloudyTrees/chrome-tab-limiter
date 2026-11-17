@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import {
     isTrustedSender,
-    isSafeReopenUrl,
     validateMessageRequest,
     parseLimitInput,
     VALID_ACTIONS
@@ -13,7 +12,7 @@ const SELF = { id: 'ext-id', origin: 'chrome-extension://ext-id/' };
 
 describe('isTrustedSender', () => {
     it('accepts this extension\'s own pages', () => {
-        for (const page of ['popup.html', 'selector.html?windowId=1', 'options.html']) {
+        for (const page of ['popup.html', 'options.html?x=1']) {
             assert.equal(isTrustedSender({ id: 'ext-id', url: SELF.origin + page }, SELF), true, page);
         }
     });
@@ -41,83 +40,58 @@ describe('isTrustedSender', () => {
     });
 });
 
-describe('isSafeReopenUrl', () => {
-    it('allows ordinary page and browser URLs', () => {
-        for (const url of [
-            'https://example.com/path?q=1',
-            'http://localhost:8080/',
-            'file:///Users/me/notes.html',
-            'chrome://newtab/',
-            'about:blank'
-        ]) {
-            assert.equal(isSafeReopenUrl(url), true, url);
-        }
-    });
-
-    it('blocks script and data schemes', () => {
-        for (const url of [
-            'javascript:alert(1)',
-            'JAVASCRIPT:alert(1)',
-            'data:text/html,<script>alert(1)</script>',
-            'blob:https://example.com/uuid',
-            'chrome-extension://abc/page.html',
-            'vbscript:msgbox(1)'
-        ]) {
-            assert.equal(isSafeReopenUrl(url), false, url);
-        }
-    });
-
-    it('rejects non-URLs', () => {
-        for (const value of [null, undefined, '', 'not a url', 42, {}]) {
-            assert.equal(isSafeReopenUrl(value), false, String(value));
-        }
-    });
-});
-
 describe('validateMessageRequest', () => {
+    const decision = { windowId: 1, opId: 'op-1', revision: 3 };
+
     it('accepts every known action with its required fields', () => {
-        const good = {
-            tabSelected: { tabId: 1, windowId: 2, newTabId: 3 },
-            cancelSelection: { newTabId: 3, windowId: 2 },
-            tabSelectedForReplacement: { tabId: 1, windowId: 2 },
-            cancelReplacement: { windowId: 2 },
-            getGrandfatheredStatus: { windowId: 2 },
-            getSelectorState: {},
-            clearSelectorState: {}
-        };
-        assert.deepEqual(Object.keys(good).sort(), [...VALID_ACTIONS].sort());
-        for (const [action, fields] of Object.entries(good)) {
-            assert.deepEqual(validateMessageRequest({ action, ...fields }), { valid: true }, action);
+        const requests = [
+            { action: 'getState', windowId: 1 },
+            { action: 'closeSelected', ...decision, tabIds: [2, 3] },
+            { action: 'closePending', ...decision },
+            { action: 'keepThese', ...decision },
+            { action: 'startEnforcing' }
+        ];
+        assert.deepEqual(requests.map((r) => r.action), [...VALID_ACTIONS]);
+        for (const request of requests) {
+            assert.deepEqual(validateMessageRequest(request), { valid: true }, request.action);
         }
     });
 
-    it('rejects non-objects and unknown actions', () => {
-        for (const request of [null, undefined, 'tabSelected', 7, { action: 'closeAllTabs' }, {}]) {
+    it('startEnforcing is global: it needs no window, operation or revision (D4)', () => {
+        assert.deepEqual(validateMessageRequest({ action: 'startEnforcing' }), { valid: true });
+    });
+
+    it('rejects non-objects, unknown actions and the removed legacy actions', () => {
+        for (const request of [null, 'x', 5, {}, { action: 'closeAllTabs' }, { action: 'tabSelected', tabId: 1, windowId: 1, newTabId: 2 },
+            { action: 'tabSelectedForReplacement', tabId: 1, windowId: 1 }, { action: 'getSelectorState' }, { action: 'clearSelectorState' }]) {
             assert.equal(validateMessageRequest(request).valid, false, JSON.stringify(request));
         }
     });
 
-    it('rejects IDs that are not safe integers', () => {
-        for (const bad of ['1', 1.5, NaN, Infinity, 2 ** 60, null]) {
-            for (const field of ['tabId', 'windowId', 'newTabId']) {
-                const request = { action: 'tabSelected', tabId: 1, windowId: 2, newTabId: 3, [field]: bad };
-                assert.equal(validateMessageRequest(request).valid, false, `${field}=${bad}`);
+    it('requires the per-window fields for per-window commands', () => {
+        for (const action of ['closeSelected', 'closePending', 'keepThese']) {
+            for (const missing of ['windowId', 'opId', 'revision']) {
+                const request = { action, ...decision, tabIds: [2] };
+                delete request[missing];
+                assert.equal(validateMessageRequest(request).valid, false, `${action} without ${missing}`);
             }
         }
+        assert.equal(validateMessageRequest({ action: 'closeSelected', ...decision }).valid, false, 'tabIds missing');
+        assert.equal(validateMessageRequest({ action: 'getState' }).valid, false);
     });
 
-    it('rejects missing required fields', () => {
-        assert.equal(validateMessageRequest({ action: 'tabSelected', tabId: 1, windowId: 2 }).valid, false);
-        assert.equal(validateMessageRequest({ action: 'cancelSelection', windowId: 2 }).valid, false);
-        assert.equal(validateMessageRequest({ action: 'tabSelectedForReplacement', windowId: 2 }).valid, false);
-        assert.equal(validateMessageRequest({ action: 'cancelReplacement' }).valid, false);
-    });
-
-    it('does not require a URL for replacement (it comes from background state)', () => {
-        assert.equal(
-            validateMessageRequest({ action: 'tabSelectedForReplacement', tabId: 1, windowId: 2 }).valid,
-            true
-        );
+    it('rejects malformed IDs, revisions and selections', () => {
+        const bad = [
+            { windowId: '1' }, { windowId: 0 }, { windowId: -1 }, { windowId: 1.5 }, { windowId: 2 ** 60 },
+            { opId: '' }, { opId: 5 }, { opId: 'x'.repeat(65) },
+            { revision: -1 }, { revision: '3' }, { revision: 1.5 },
+            { tabIds: [] }, { tabIds: ['2'] }, { tabIds: [0] }, { tabIds: [2, 2] }, { tabIds: 'all' },
+            { tabIds: Array.from({ length: 1001 }, (_, i) => i + 1) }
+        ];
+        for (const override of bad) {
+            const request = { action: 'closeSelected', ...decision, tabIds: [2], ...override };
+            assert.equal(validateMessageRequest(request).valid, false, JSON.stringify(override).slice(0, 60));
+        }
     });
 });
 

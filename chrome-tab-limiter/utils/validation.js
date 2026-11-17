@@ -2,19 +2,14 @@
 // Kept free of chrome.* calls so they can be unit tested in Node.
 
 export const VALID_ACTIONS = Object.freeze([
-    'tabSelected',
-    'cancelSelection',
-    'tabSelectedForReplacement',
-    'cancelReplacement',
-    'getGrandfatheredStatus',
-    'getSelectorState',
-    'clearSelectorState'
+    'getState',
+    'closeSelected',
+    'closePending',
+    'keepThese',
+    'startEnforcing'
 ]);
 
-// URL schemes the extension is willing to reopen after a replacement
-const SAFE_REOPEN_PROTOCOLS = Object.freeze(['http:', 'https:', 'file:', 'chrome:', 'about:']);
-
-// Accept messages only from this extension's own pages (popup, selector, options).
+// Accept messages only from this extension's own pages (popup, options).
 // `self` is { id: chrome.runtime.id, origin: chrome.runtime.getURL('') }.
 export function isTrustedSender(sender, self) {
     if (!sender || !self || sender.id !== self.id) {
@@ -23,14 +18,17 @@ export function isTrustedSender(sender, self) {
     return typeof sender.url === 'string' && sender.url.startsWith(self.origin);
 }
 
-// Only reopen URLs with safe schemes
-export function isSafeReopenUrl(url) {
-    try {
-        return SAFE_REOPEN_PROTOCOLS.includes(new URL(url).protocol);
-    } catch {
-        return false;
-    }
-}
+const MAX_SELECTION = 1000;
+
+// Fields each action needs. `startEnforcing` is global (D4): it has no window,
+// operation or revision, because it must work when no operation exists.
+const REQUIRED_FIELDS = Object.freeze({
+    getState: ['windowId'],
+    closeSelected: ['windowId', 'opId', 'revision', 'tabIds'],
+    closePending: ['windowId', 'opId', 'revision'],
+    keepThese: ['windowId', 'opId', 'revision'],
+    startEnforcing: []
+});
 
 // Validate the shape of a runtime message before acting on it
 export function validateMessageRequest(request) {
@@ -38,36 +36,39 @@ export function validateMessageRequest(request) {
         return { valid: false, error: 'Invalid message format' };
     }
 
-    const { action, tabId, windowId, newTabId } = request;
-
+    const { action } = request;
     if (!VALID_ACTIONS.includes(action)) {
         return { valid: false, error: 'Invalid action' };
     }
 
-    // Validate IDs are safe integers
-    if (tabId !== undefined && !Number.isSafeInteger(tabId)) {
-        return { valid: false, error: 'Invalid tab ID' };
+    for (const field of REQUIRED_FIELDS[action]) {
+        if (request[field] === undefined) {
+            return { valid: false, error: `Missing required field ${field} for ${action}` };
+        }
     }
 
-    if (windowId !== undefined && !Number.isSafeInteger(windowId)) {
+    if (request.windowId !== undefined && !(Number.isSafeInteger(request.windowId) && request.windowId > 0)) {
         return { valid: false, error: 'Invalid window ID' };
     }
 
-    if (newTabId !== undefined && !Number.isSafeInteger(newTabId)) {
-        return { valid: false, error: 'Invalid new tab ID' };
+    if (request.opId !== undefined && !(typeof request.opId === 'string' && request.opId.length >= 1 && request.opId.length <= 64)) {
+        return { valid: false, error: 'Invalid operation ID' };
     }
 
-    // Action-specific required fields
-    const required = {
-        tabSelected: ['tabId', 'windowId', 'newTabId'],
-        cancelSelection: ['newTabId', 'windowId'],
-        tabSelectedForReplacement: ['tabId', 'windowId'],
-        cancelReplacement: ['windowId']
-    }[action] || [];
+    if (request.revision !== undefined && !(Number.isSafeInteger(request.revision) && request.revision >= 0)) {
+        return { valid: false, error: 'Invalid revision' };
+    }
 
-    for (const field of required) {
-        if (!request[field]) {
-            return { valid: false, error: `Missing required field ${field} for ${action}` };
+    if (request.tabIds !== undefined) {
+        const { tabIds } = request;
+        const valid =
+            Array.isArray(tabIds) &&
+            tabIds.length >= 1 &&
+            tabIds.length <= MAX_SELECTION &&
+            tabIds.every((id) => Number.isSafeInteger(id) && id > 0) &&
+            new Set(tabIds).size === tabIds.length;
+        if (!valid) {
+            return { valid: false, error: 'Invalid tab IDs' };
         }
     }
 

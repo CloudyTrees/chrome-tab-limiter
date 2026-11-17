@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createChromeMock, flush, EXTENSION_ID, EXTENSION_ORIGIN } from './helpers/chrome-mock.js';
 
 // background.js is an ES module with top-level side effects (it registers
-// listeners and counts tabs on load). Each import with a unique query string
+// listeners and reconciles on load). Each import with a unique query string
 // gives a fresh module instance, simulating a fresh service worker.
 let instance = 0;
 async function startServiceWorker(harness) {
@@ -14,265 +14,828 @@ async function startServiceWorker(harness) {
 }
 
 const POPUP = { id: EXTENSION_ID, url: `${EXTENSION_ORIGIN}popup.html` };
-const BLOCKED_URL = 'https://example.com/article';
-
 let harness;
 
-beforeEach(async () => {
-    // Background logs expected rejections; keep test output clean
-    mock.method(console, 'error', () => {});
-    mock.method(console, 'warn', () => {});
-
-    harness = createChromeMock({
-        tabs: [
-            { id: 1, windowId: 1, url: 'https://a.example/' },
-            { id: 2, windowId: 1, url: 'https://b.example/' },
-            { id: 3, windowId: 1, url: 'https://c.example/' },
-            { id: 10, windowId: 2, url: 'https://other-window.example/' }
-        ]
-    });
-    await harness.chrome.storage.local.set({ defaultTabLimit: 3 });
+const cmd = (request, sender = POPUP) => harness.sendMessage(request, sender);
+const getState = async (windowId = 1) => cmd({ action: 'getState', windowId });
+const getOp = async (windowId = 1) => (await getState(windowId)).operation;
+const savedState = async () => (await harness.chrome.storage.session.get('tl_state')).tl_state;
+const decide = (op, extra = {}) => ({ windowId: 1, opId: op.opId, revision: op.revision, ...extra });
+const startEnforcing = () => cmd({ action: 'startEnforcing' });
+const workerRestart = async () => {
+    harness.resetListeners();
     await startServiceWorker(harness);
-});
+};
+const browserRestart = async () => {
+    await harness.restartBrowser();
+    await startServiceWorker(harness);
+};
 
-afterEach(() => {
-    mock.restoreAll();
-});
-
-// Open a tab in window 1 (which is at its limit of 3) and let the background react
-async function hitTheLimit(url = BLOCKED_URL) {
-    const id = harness.userOpensTab({ windowId: 1, pendingUrl: url });
+// Open a tab in `windowId` and let the background react
+async function open(windowId = 1, extra = {}) {
+    const id = harness.userOpensTab({ windowId, pendingUrl: 'https://new.example/', ...extra });
     await flush();
     return id;
 }
+const openMany = async (count, windowId = 1, extra = {}) => {
+    const ids = [];
+    for (let i = 0; i < count; i++) ids.push(await open(windowId, extra));
+    return ids;
+};
 
-const selectorState = async () =>
-    (await harness.chrome.storage.session.get('selectorState')).selectorState;
+// Window 1 holds 3 tabs and its limit is 3; window 2 holds one tab
+async function setup({ limit = 3, enforce = true, tabs, local = {} } = {}) {
+    harness = createChromeMock({
+        tabs: tabs ?? [
+            { id: 1, windowId: 1, url: 'https://a.example/' },
+            { id: 2, windowId: 1, url: 'https://b.example/' },
+            { id: 3, windowId: 1, url: 'https://c.example/' },
+            { id: 10, windowId: 2, url: 'https://other.example/' }
+        ]
+    });
+    await harness.chrome.storage.local.set({ defaultTabLimit: limit, ...local });
+    await startServiceWorker(harness);
+    if (enforce) {
+        await startEnforcing(); // normal cap-only enforcement; startup mode is tested separately
+    }
+}
 
-describe('limit enforcement', () => {
-    it('allows a new tab while under the limit', async () => {
-        await harness.chrome.storage.local.set({ defaultTabLimit: 5 });
-        const id = harness.userOpensTab({ windowId: 1, pendingUrl: BLOCKED_URL });
-        await flush();
+beforeEach(() => {
+    mock.method(console, 'error', () => {});
+    mock.method(console, 'warn', () => {});
+});
 
-        assert.ok(harness.tabIds(1).includes(id));
+afterEach(() => {
+    mock.timers.reset();
+    mock.restoreAll();
+});
+
+// ------------------------------------------------------------ 1. creation
+
+describe('creation', () => {
+    beforeEach(() => setup());
+
+    it('admits a tab while under the limit', async () => {
+        const id = await open(2);
+        assert.ok(harness.tabIds(2).includes(id));
+        assert.equal(await getOp(2), null);
         assert.equal(harness.calls.openPopup, 0);
     });
 
-    it('closes a tab that would exceed the limit and opens the selector', async () => {
-        const id = await hitTheLimit();
+    it('keeps the first excess tab open as pending and opens the popup', async () => {
+        const id = await open();
 
-        assert.equal(harness.tabIds(1).includes(id), false, 'blocked tab should be closed');
+        assert.ok(harness.tabIds(1).includes(id), 'the tab stays open');
+        const op = await getOp();
+        assert.equal(op.kind, 'normal');
+        assert.equal(op.canKeep, false);
+        assert.equal(op.tabs.find((t) => t.id === id).status, 'pending');
         assert.equal(harness.calls.openPopup, 1);
-        assert.deepEqual(await selectorState(), {
-            isActive: true,
-            windowId: 1,
-            mode: 'replace',
-            newTabUrl: BLOCKED_URL,
-            newTabId: null
-        });
+        assert.equal(harness.calls.badge, '1');
     });
 
-    it('enforces limits per window', async () => {
-        const id = harness.userOpensTab({ windowId: 2, pendingUrl: BLOCKED_URL });
+    it('leaves pending tabs open and badged when the popup cannot open', async () => {
+        harness.failures.openPopup = true;
+        const id = await open();
         await flush();
-        assert.ok(harness.tabIds(2).includes(id), 'window 2 has 1 tab, so it is under the limit');
+
+        assert.ok(harness.tabIds(1).includes(id));
+        assert.equal(harness.calls.badge, '1');
+        assert.ok(await getOp());
     });
 
-    it('keeps enforcing the limit after a tab was blocked', async () => {
-        await hitTheLimit();
-        await harness.sendMessage({ action: 'clearSelectorState' }, POPUP);
+    it('rejects the tab after the pending cap and counts it', async () => {
+        const pending = await openMany(5);
+        const sixth = await open();
 
-        // Window 1 still has 3 tabs, so another new tab must also be blocked
-        const second = await hitTheLimit('https://second.example/');
-        assert.equal(harness.tabIds(1).includes(second), false, 'limit drifted after a blocked tab');
-        assert.deepEqual(harness.tabIds(1).sort(), [1, 2, 3]);
+        assert.deepEqual(pending.filter((id) => !harness.tabIds(1).includes(id)), [], 'five stay open');
+        assert.equal(harness.tabIds(1).includes(sixth), false, 'the sixth is closed');
+        const op = await getOp();
+        assert.equal(op.rejectedCount, 1);
+        assert.equal(op.pendingCount, 5);
     });
 
-    it('keeps the window count accurate across tab groups after a blocked tab', async () => {
-        // Spread the tabs over groups so only the *window* limit can catch the next tab
-        const grouped = createChromeMock({
-            tabs: [
-                { id: 1, windowId: 1, groupId: 7 },
-                { id: 2, windowId: 1, groupId: 7 },
-                { id: 3, windowId: 1, groupId: -1 }
-            ]
-        });
-        await grouped.chrome.storage.local.set({ defaultTabLimit: 3 });
-        harness.resetListeners();
-        harness = grouped;
-        await startServiceWorker(harness);
+    it('handles a burst of 12 without bypassing the limit', async () => {
+        // Window 2 has 1 tab (limit 3). Twelve tabs open before the background reacts.
+        const ids = [];
+        for (let i = 0; i < 12; i++) {
+            ids.push(harness.userOpensTab({ windowId: 2, pendingUrl: `https://burst${i}.example/` }));
+        }
+        await flush(30);
 
-        for (const url of ['https://first.example/', 'https://second.example/']) {
-            harness.userOpensTab({ windowId: 1, groupId: -1, pendingUrl: url });
+        // 2 admitted up to capacity, 5 pending, 5 rejected
+        assert.equal(harness.tabIds(2).length, 3 + 5);
+        const op = await getOp(2);
+        assert.equal(op.pendingCount, 5);
+        assert.equal(op.rejectedCount, 5);
+        assert.deepEqual(ids.filter((id) => harness.tabIds(2).includes(id)).length, 7);
+    });
+
+    it('applies a configurable cap, and lowering it closes nothing', async () => {
+        await harness.chrome.storage.local.set({ maxPendingPerWindow: 4 });
+        const pending = await openMany(4);
+        assert.equal(harness.tabIds(1).length, 3 + 4);
+
+        await harness.chrome.storage.local.set({ maxPendingPerWindow: 1 });
+        await flush();
+        assert.equal(harness.tabIds(1).length, 3 + 4, 'lowering the cap closed nothing');
+        for (const id of pending) assert.ok(harness.tabIds(1).includes(id));
+
+        const next = await open();
+        assert.equal(harness.tabIds(1).includes(next), false, 'the next tab is rejected under the new cap');
+    });
+
+    it('falls back to the default cap for an invalid setting', async () => {
+        await harness.chrome.storage.local.set({ maxPendingPerWindow: 99 });
+        await openMany(6);
+        assert.equal(harness.tabIds(1).length, 3 + 5);
+    });
+
+    it('enforces each window separately', async () => {
+        await open(1);
+        const id = await open(2);
+        assert.ok(harness.tabIds(2).includes(id));
+        assert.equal(await getOp(2), null);
+    });
+
+    it('C1: an open operation in group A also governs a new tab that fits group B', async () => {
+        harness.groups.push({ id: 7, windowId: 1, title: 'Work', color: 'blue' });
+        await harness.chrome.storage.local.set({ defaultTabLimit: 10, groupLimit_1_7: 1 });
+        harness.setGroup(1, 7);
+        harness.setGroup(2, 7); // group 7 now holds 2 tabs, limit 1
+        await flush();
+        const op = await getOp();
+        assert.ok(op, 'group 7 is over');
+
+        // Below the cap: a new ungrouped tab fits the window and its own group, but still joins as pending
+        const below = await open(1, { groupId: -1 });
+        assert.equal((await getOp()).tabs.find((t) => t.id === below).status, 'pending');
+
+        // At the cap: further tabs are rejected even though they fit
+        await openMany(4, 1, { groupId: -1 });
+        const atCap = await open(1, { groupId: -1 });
+        assert.equal(harness.tabIds(1).includes(atCap), false);
+    });
+
+    it('throttles automatic popups to once per window every 5 seconds', async () => {
+        mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+        await open();
+        await open();
+        assert.equal(harness.calls.openPopup, 1);
+
+        mock.timers.tick(5001);
+        await open();
+        assert.equal(harness.calls.openPopup, 2);
+    });
+});
+
+// --------------------------------------------------- 2. movement and staleness
+
+describe('movement and staleness', () => {
+    beforeEach(() => setup());
+
+    it('resolves the operation when tabs are closed by hand', async () => {
+        const pending = await open();
+        assert.ok(await getOp());
+        await harness.chrome.tabs.remove(pending);
+        await flush();
+
+        assert.equal(await getOp(), null);
+        assert.equal(harness.calls.badge, '');
+    });
+
+    it('any tab navigating invalidates the selection, a title change does not (R3)', async () => {
+        await open();
+        const before = (await getOp()).revision;
+
+        harness.retitle(1, 'New title');
+        await flush();
+        assert.equal((await getOp()).revision, before, 'title only');
+
+        harness.navigate(1, 'https://elsewhere.example/'); // an ordinary tab
+        await flush();
+        const afterNav = (await getOp()).revision;
+        assert.ok(afterNav > before, 'ordinary tab navigated');
+    });
+
+    it('rejects a confirmation made against a stale revision', async () => {
+        await open();
+        const op = await getOp();
+        harness.navigate(2, 'https://changed.example/');
+        await flush();
+
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1] }) });
+        assert.equal(response.success, false);
+        assert.ok(harness.tabIds(1).includes(1), 'nothing closed');
+    });
+
+    it('a tab moved into a full window is protected, never rejected, and not capped', async () => {
+        await harness.chrome.storage.local.set({ maxPendingPerWindow: 1 });
+        await harness.chrome.storage.local.set({ tabLimit_2: 10, groupLimit_2_ungrouped: 10 });
+        const incoming = await openMany(4, 2);
+        // Window 1 is full (3 of 3). Drag four tabs in; the pending cap (1) must not apply.
+        for (const id of incoming) {
+            harness.moveTab(id, 1);
             await flush();
-            await harness.sendMessage({ action: 'clearSelectorState' }, POPUP);
         }
 
-        assert.deepEqual(harness.tabIds(1).sort(), [1, 2, 3], 'window grew past its limit');
+        for (const id of incoming) assert.ok(harness.tabIds(1).includes(id), 'moved tabs are kept');
+        const op = await getOp();
+        assert.deepEqual(op.tabs.filter((t) => t.status === 'moved').map((t) => t.id).sort(), incoming.sort());
+        assert.equal(op.rejectedCount, 0);
     });
 
-    it('grandfathers windows that were already over the limit at startup', async () => {
-        await harness.chrome.storage.local.set({ defaultTabLimit: 2 });
-        harness.resetListeners();
-        await startServiceWorker(harness); // window 1 has 3 tabs, limit 2
+    it('moving a tab out resolves the source window', async () => {
+        await open();
+        const op = await getOp();
+        const pendingId = op.tabs.find((t) => t.status === 'pending').id;
 
-        const status = await harness.sendMessage({ action: 'getGrandfatheredStatus', windowId: 1 }, POPUP);
-        assert.deepEqual(status, { success: true, isGrandfathered: true, grandfatheredCount: 3 });
+        harness.moveTab(pendingId, 2); // window 2 has room
+        await flush();
 
-        // Cannot grow beyond the grandfathered count
-        const id = await hitTheLimit();
-        assert.equal(harness.tabIds(1).includes(id), false);
+        assert.equal(await getOp(1), null);
+        assert.equal(await getOp(2), null);
     });
 
-    it('cleans up stored limits when a window closes', async () => {
-        await harness.chrome.storage.local.set({
-            tabLimit_1: 4,
-            groupLimit_1_7: 2,
-            tabLimit_2: 6
-        });
+    it('C2: a pending tab moved into another full window becomes moved', async () => {
+        await openMany(2); // window 1: 5 tabs, both pending
+        const pendingId = (await getOp()).tabs.find((t) => t.status === 'pending').id;
+
+        // Fill window 2 (limit 3) so the destination is over once the tab arrives
+        await openMany(2, 2);
+        harness.moveTab(pendingId, 2);
+        await flush();
+
+        const op2 = await getOp(2);
+        assert.equal(op2.tabs.find((t) => t.id === pendingId).status, 'moved');
+    });
+
+    it('C2: a pending tab put into a group that is over becomes moved', async () => {
+        harness.groups.push({ id: 7, windowId: 1, title: 'Work', color: 'blue' });
+        await harness.chrome.storage.local.set({ groupLimit_1_7: 1 });
+        harness.setGroup(1, 7);
+        await flush();
+
+        const pendingId = await open(1, { groupId: -1 });
+        assert.equal((await getOp()).tabs.find((t) => t.id === pendingId).status, 'pending');
+
+        harness.setGroup(pendingId, 7); // group 7 would hold 2, limit 1
+        await flush();
+        const status = (await getOp()).tabs.find((t) => t.id === pendingId).status;
+        assert.equal(status, 'moved');
+    });
+
+    it('handles tab replacement by substituting the ID', async () => {
+        const pending = await open();
+        const before = (await getOp()).revision;
+
+        harness.replaceTab(pending, 5000);
+        await flush();
+
+        const op = await getOp();
+        assert.equal(op.tabs.find((t) => t.id === 5000).status, 'pending');
+        assert.ok(op.revision > before);
+    });
+
+    it('cleans up stored limits and state when a window closes', async () => {
+        await harness.chrome.storage.local.set({ tabLimit_1: 4, groupLimit_1_7: 2, tabLimit_2: 6 });
+        await open();
         harness.chrome.windows.onRemoved._fire(1);
         await flush();
 
         assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 3, tabLimit_2: 6 });
+        assert.equal((await savedState()).windows[1], undefined);
     });
 });
 
-describe('replacing a tab after hitting the limit', () => {
-    it('closes the chosen tab and reopens the blocked URL in the same window', async () => {
-        await hitTheLimit();
+// ---------------------------------------------------------------- commands
 
-        const response = await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 2, windowId: 1 }, POPUP);
-        await flush();
+describe('closeSelected', () => {
+    beforeEach(async () => {
+        await setup();
+        await open();
+    });
+
+    it('closes the chosen tabs when they resolve every limit, then the operation ends', async () => {
+        const op = await getOp();
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1] }) });
 
         assert.deepEqual(response, { success: true });
-        assert.equal(harness.tabIds(1).includes(2), false, 'chosen tab should be closed');
-        const reopened = harness.findTab((t) => t.url === BLOCKED_URL);
-        assert.ok(reopened, 'blocked URL should be reopened');
-        assert.equal(reopened.windowId, 1);
-        assert.equal(harness.tabIds(1).length, 3, 'window stays at its limit');
-        assert.equal(await selectorState(), undefined, 'state is consumed');
+        assert.equal(harness.tabIds(1).includes(1), false);
+        assert.equal(harness.tabIds(1).length, 3);
+        await flush();
+        assert.equal(await getOp(), null);
     });
 
-    it('cannot be replayed to close more tabs', async () => {
-        await hitTheLimit();
-        await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 2, windowId: 1 }, POPUP);
-        await flush();
-
-        const replay = await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 3, windowId: 1 }, POPUP);
-        await flush();
-
-        assert.equal(replay.success, false);
-        assert.ok(harness.tabIds(1).includes(3), 'replay must not close another tab');
-    });
-
-    it('ignores any URL supplied in the message', async () => {
-        await hitTheLimit();
-        await harness.sendMessage(
-            { action: 'tabSelectedForReplacement', tabId: 2, windowId: 1, newTabUrl: 'javascript:alert(1)' },
-            POPUP
-        );
-        await flush();
-
-        assert.equal(harness.findTab((t) => t.url.startsWith('javascript:')), undefined);
-        assert.ok(harness.findTab((t) => t.url === BLOCKED_URL));
-    });
-
-    it('refuses to close a tab from a different window', async () => {
-        await hitTheLimit();
-
-        const response = await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 10, windowId: 1 }, POPUP);
-        await flush();
+    it('refuses a selection that does not resolve the limits', async () => {
+        await open(); // two pending now: 5 tabs, limit 3
+        const op = await getOp();
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1] }) });
 
         assert.equal(response.success, false);
-        assert.ok(harness.tabIds(2).includes(10), 'tab in window 2 must survive');
-        assert.equal((await selectorState()).isActive, true, 'user can still pick a valid tab');
+        assert.equal(harness.tabIds(1).length, 5, 'nothing closed');
     });
 
-    it('refuses when no selection is pending', async () => {
-        const response = await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 2, windowId: 1 }, POPUP);
-        await flush();
+    it('refuses to close every tab in the window', async () => {
+        await harness.chrome.storage.local.set({ tabLimit_1: 1 });
+        await open();
+        const op = await getOp();
+        const all = harness.tabIds(1);
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: all }) });
 
         assert.equal(response.success, false);
+        assert.equal(harness.tabIds(1).length, all.length);
+    });
+
+    it('refuses a tab from another window', async () => {
+        const op = await getOp();
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [10] }) });
+        assert.equal(response.success, false);
+        assert.ok(harness.tabIds(2).includes(10));
+    });
+
+    it('cannot be replayed or run twice at once', async () => {
+        const op = await getOp();
+        const request = { action: 'closeSelected', ...decide(op, { tabIds: [1] }) };
+        const [first, second] = await Promise.all([cmd(request), cmd(request)]);
+
+        assert.equal([first, second].filter((r) => r.success).length, 1, 'exactly one succeeds');
+        assert.equal(harness.tabIds(1).length, 3, 'only one tab closed');
+        assert.equal((await cmd(request)).success, false, 'a later replay fails too');
+    });
+
+    it('a partial tabs.remove failure reopens the operation with a new revision, never replayed', async () => {
+        await open(); // 5 tabs: pending cap leaves two pending, limit 3 -> need to close 2
+        const op = await getOp();
+        harness.failures.removeTab = (id) => id === 2;
+
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1, 2] }) });
+        assert.equal(response.success, true);
+        await flush();
+
+        assert.equal(harness.tabIds(1).includes(1), false, 'tab 1 was closed');
+        assert.equal(harness.tabIds(1).includes(2), true, 'tab 2 failed to close');
+        const after = await getOp();
+        assert.ok(after, 'still over: the operation reopens');
+        assert.equal(after.phase, 'open');
+        assert.ok(after.revision > op.revision);
+        const attempts = harness.calls.removeAttempts.filter((id) => id === 2).length;
+        assert.equal(attempts, 1, 'the failed removal is not retried');
+    });
+
+    it('R4: stops before closing the last tab when another tab was closed by hand mid-command', async () => {
+        await setup({ limit: 1 }); // window 1: tabs 1, 2, 3, limit 1
+        const op = await getOp();
+
+        // Just before tab 2 is closed, the user closes tab 3 by hand
+        const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+        harness.chrome.tabs.get = async (id) => {
+            const tab = await realGet(id);
+            if (id === 2) await harness.chrome.tabs.remove(3);
+            return tab;
+        };
+
+        const response = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1, 2] }) });
+        await flush();
+
+        assert.equal(response.success, true);
+        assert.deepEqual(harness.tabIds(1), [2], 'the last tab in the window survives');
+    });
+});
+
+describe('closePending', () => {
+    beforeEach(() => setup());
+
+    it('closes only the pending tabs', async () => {
+        const pending = await openMany(2);
+        const op = await getOp();
+        const response = await cmd({ action: 'closePending', ...decide(op) });
+
+        assert.deepEqual(response, { success: true });
+        for (const id of pending) assert.equal(harness.tabIds(1).includes(id), false);
         assert.deepEqual(harness.tabIds(1).sort(), [1, 2, 3]);
     });
 
-    it('refuses to reopen a URL with an unsafe scheme', async () => {
-        await harness.chrome.storage.session.set({
-            selectorState: { isActive: true, windowId: 1, mode: 'replace', newTabUrl: 'javascript:alert(1)', newTabId: null }
+    it('never closes moved tabs', async () => {
+        const moved = await open(2);
+        harness.moveTab(moved, 1);
+        await flush();
+        const pending = await open();
+        const op = await getOp();
+        await cmd({ action: 'closePending', ...decide(op) });
+        await flush();
+
+        assert.ok(harness.tabIds(1).includes(moved), 'moved tab survives');
+        assert.equal(harness.tabIds(1).includes(pending), false);
+    });
+
+    it('R4: is refused when it would close the whole window (limit 1, ordinary tab closed by hand)', async () => {
+        await setup({
+            limit: 1,
+            tabs: [
+                { id: 1, windowId: 1, url: 'https://a.example/' },
+                { id: 10, windowId: 2, url: 'https://other.example/' }
+            ]
         });
-
-        const response = await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 2, windowId: 1 }, POPUP);
+        await openMany(2); // two pending
+        const op = await getOp();
+        await harness.chrome.tabs.remove(1); // the only ordinary tab
         await flush();
+        const fresh = await getOp();
+        assert.ok(fresh.revision > op.revision);
 
+        const response = await cmd({ action: 'closePending', ...decide(fresh) });
         assert.equal(response.success, false);
-        assert.deepEqual(harness.tabIds(1).sort(), [1, 2, 3], 'nothing closed or opened');
-    });
-
-    it('survives a service worker restart while the popup is open', async () => {
-        await hitTheLimit();
-
-        harness.resetListeners();
-        await startServiceWorker(harness);
-
-        const state = await harness.sendMessage({ action: 'getSelectorState' }, POPUP);
-        assert.equal(state.selectorState.newTabUrl, BLOCKED_URL);
-
-        const response = await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: 2, windowId: 1 }, POPUP);
-        await flush();
-        assert.deepEqual(response, { success: true });
-        assert.ok(harness.findTab((t) => t.url === BLOCKED_URL));
-    });
-
-    it('clearSelectorState discards the pending selection', async () => {
-        await hitTheLimit();
-        assert.deepEqual(await harness.sendMessage({ action: 'clearSelectorState' }, POPUP), { success: true });
-        assert.equal(await selectorState(), undefined);
+        assert.match(response.error, /close the window/);
+        assert.equal(harness.tabIds(1).length, 2, 'both tabs remain');
+        assert.equal((await getOp()).canClosePending, false);
     });
 });
 
+// ------------------------------------------------------------------- restart
+
+describe('worker restart and recovery', () => {
+    beforeEach(() => setup());
+
+    it('keeps the operation, statuses and revision across a worker restart', async () => {
+        const id = await open();
+        const before = await getOp();
+
+        await workerRestart();
+        const after = await getOp();
+
+        assert.equal(after.opId, before.opId);
+        assert.equal(after.tabs.find((t) => t.id === id).status, 'pending');
+    });
+
+    it('a restart before a pending ID was saved shows unexplained excess for review', async () => {
+        harness.addTabSilently({ windowId: 1, url: 'https://lost.example/' }); // nobody heard it open
+        await workerRestart();
+
+        const op = await getOp();
+        assert.ok(op, 'the excess opens an operation');
+        assert.equal(op.kind, 'normal');
+        assert.equal(op.tabs.every((t) => t.status === 'ordinary'), true);
+        assert.equal(harness.tabIds(1).length, 4, 'nothing was closed');
+    });
+
+    it('never replays a closing phase after a restart', async () => {
+        await open();
+        const op = await getOp();
+        const state = await savedState();
+        state.windows[1].op.phase = 'closing';
+        state.windows[1].op.closing = [1];
+        await harness.chrome.storage.session.set({ tl_state: state });
+        harness.calls.removeAttempts.length = 0;
+
+        await workerRestart();
+
+        assert.deepEqual(harness.calls.removeAttempts, [], 'no tab was closed');
+        const after = await getOp();
+        assert.equal(after.phase, 'open');
+        assert.ok(after.revision > op.revision);
+        assert.equal(harness.tabIds(1).length, 4);
+    });
+
+    it('C3: a restart never raises an allowance (limit 10, allowance 12, 13 tabs)', async () => {
+        const tabs = Array.from({ length: 13 }, (_, i) => ({ id: i + 1, windowId: 1, url: `https://t${i}.example/` }));
+        await setup({ limit: 10, tabs, enforce: false });
+        const first = await getOp();
+        await cmd({ action: 'keepThese', ...decide(first) }); // allowance becomes 13
+        const state = await savedState();
+        state.windows[1].allowance = { window: 12, groups: { '-1': 12 } };
+        state.windows[1].op = state.windows[1].op ?? null;
+        await harness.chrome.storage.session.set({ tl_state: state });
+
+        await workerRestart();
+
+        const after = await savedState();
+        assert.equal(after.startupMode, false, 'a restart never turns startup mode back on');
+        assert.equal(after.windows[1].allowance.window, 12);
+        assert.ok(await getOp(), 'the 13th tab is still unresolved');
+    });
+
+    it('treats a tracked tab found in another window after a restart as moved', async () => {
+        const pending = await open();
+        harness.resetListeners();
+        harness.moveTab(pending, 2); // moved while the worker was down (no events heard)
+        harness.addTabSilently({ windowId: 2, url: 'https://x.example/' });
+        harness.addTabSilently({ windowId: 2, url: 'https://y.example/' });
+        await startServiceWorker(harness);
+
+        const op2 = await getOp(2);
+        assert.equal(op2.tabs.find((t) => t.id === pending).status, 'moved');
+    });
+});
+
+// -------------------------------------------------------------- 4. startup
+
+describe('startup mode (D1)', () => {
+    const overLimitSession = () => [
+        ...Array.from({ length: 5 }, (_, i) => ({ id: i + 1, windowId: 1, url: `https://restored${i}.example/` })),
+        { id: 10, windowId: 2, url: 'https://other.example/' }
+    ];
+
+    it('starts in startup mode, marks restored excess as startup, and closes nothing', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+
+        const state = await getState();
+        assert.equal(state.startupMode, true);
+        assert.equal(state.operation.kind, 'startup');
+        assert.equal(state.operation.canKeep, true);
+        assert.equal(state.operation.tabs.every((t) => t.status === 'startup'), true);
+        assert.equal(harness.tabIds(1).length, 5);
+        assert.equal(harness.calls.badge, '2');
+    });
+
+    it('never rejects startup excess, however many tabs open', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        const ids = await openMany(9);
+
+        for (const id of ids) assert.ok(harness.tabIds(1).includes(id));
+        const op = await getOp();
+        assert.equal(op.rejectedCount, 0);
+        assert.equal(op.tabs.filter((t) => t.status === 'pending').length, 0);
+    });
+
+    it('R1: a tab that fits its own group is admitted while another group\'s startup operation is open, below and above the cap', async () => {
+        await setup({
+            enforce: false,
+            limit: 20,
+            local: { groupLimit_1_7: 2 },
+            tabs: [
+                { id: 1, windowId: 1, groupId: 7, url: 'https://a.example/' },
+                { id: 2, windowId: 1, groupId: 7, url: 'https://b.example/' },
+                { id: 3, windowId: 1, groupId: 7, url: 'https://c.example/' },
+                { id: 10, windowId: 2, url: 'https://other.example/' }
+            ]
+        });
+        assert.ok(await getOp(), 'group 7 is over (3 > 2)');
+
+        // Group -1 (default limit 20) has plenty of room. 8 tabs is above the pending cap of 5.
+        const ids = await openMany(8, 1, { groupId: -1 });
+        for (const id of ids) assert.ok(harness.tabIds(1).includes(id), 'no tab is rejected');
+        const op = await getOp();
+        assert.equal(op.rejectedCount, 0);
+        assert.equal(op.tabs.filter((t) => t.status === 'pending').length, 0);
+    });
+
+    it('Keep these raises the allowance to the eligible tabs and ends the operation', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        const op = await getOp();
+        const response = await cmd({ action: 'keepThese', ...decide(op) });
+
+        assert.deepEqual(response, { success: true });
+        assert.equal(await getOp(), null, 'the window is within its allowance');
+        const state = await savedState();
+        assert.equal(state.windows[1].allowance.window, 5);
+
+        // Normal enforcement: the allowance is full, so a new tab is pending
+        const id = await open();
+        assert.equal((await getOp()).tabs.find((t) => t.id === id).status, 'pending');
+    });
+
+    it('R2: Keep these excludes tabs opened after startup mode ended', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        await startEnforcing();
+        const late = await open(); // window 1 still has its startup operation: pending
+        assert.equal((await getOp()).tabs.find((t) => t.id === late).status, 'pending');
+
+        const op = await getOp();
+        await cmd({ action: 'keepThese', ...decide(op) });
+
+        const state = await savedState();
+        assert.equal(state.windows[1].allowance.window, 5, 'the late tab is not grandfathered');
+        const after = await getOp();
+        assert.ok(after, 'the pending tab keeps the operation open');
+        assert.equal(after.tabs.find((t) => t.id === late).status, 'pending');
+    });
+
+    it('the first decision in one window ends startup mode everywhere', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        await harness.chrome.storage.local.set({ tabLimit_2: 1 });
+        const op = await getOp();
+        await cmd({ action: 'keepThese', ...decide(op) });
+
+        assert.equal((await getState(2)).startupMode, false);
+        const id = await open(2);
+        assert.ok(harness.tabIds(2).includes(id));
+        const id2 = await open(2);
+        assert.equal((await getOp(2)).tabs.find((t) => t.id === id2).status, 'pending');
+    });
+
+    it('closing tabs counts as the first decision too', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        const op = await getOp();
+        await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1, 2] }) });
+        assert.equal((await getState()).startupMode, false);
+    });
+
+    it('a worker restart during startup keeps the mode on', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        await workerRestart();
+        assert.equal((await getState()).startupMode, true);
+    });
+
+    it('an extension reload with an operation open loses nothing and closes nothing', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        await startEnforcing();
+        await open(); // pending in the startup window
+        const tabsBefore = harness.tabIds(1).sort();
+
+        await browserRestart();
+
+        assert.deepEqual(harness.tabIds(1).sort(), tabsBefore, 'no tab closed');
+        const state = await getState();
+        assert.equal(state.startupMode, true, 'startup mode is on again after a reload');
+        assert.equal(state.operation.tabs.every((t) => t.status === 'startup'), true);
+    });
+
+    it('decides a creation event that arrives around initialization after initializing', async () => {
+        harness = createChromeMock({ tabs: overLimitSession() });
+        await harness.chrome.storage.local.set({ defaultTabLimit: 3 });
+        globalThis.chrome = harness.chrome;
+        const importing = import(new URL(`../chrome-tab-limiter/background.js?sw=${++instance}`, import.meta.url));
+        await importing;
+        const id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://early.example/' }); // before init finished
+        await flush();
+
+        assert.ok(harness.tabIds(1).includes(id), 'startup excess is never closed');
+        const op = await getOp();
+        assert.equal(op.tabs.find((t) => t.id === id).status, 'startup');
+    });
+
+    it('a fresh startup with nothing over limit offers no operation but startup mode is on', async () => {
+        await setup({ enforce: false });
+        const state = await getState();
+        assert.equal(state.startupMode, true);
+        assert.equal(state.operation, null);
+    });
+});
+
+// ------------------------------------------------- D4: start enforcing now
+
+describe('startEnforcing (D4)', () => {
+    const overLimitSession = () => [
+        ...Array.from({ length: 5 }, (_, i) => ({ id: i + 1, windowId: 1, url: `https://r${i}.example/` })),
+        ...Array.from({ length: 4 }, (_, i) => ({ id: i + 20, windowId: 2, url: `https://s${i}.example/` }))
+    ];
+
+    it('works with no operation open', async () => {
+        await setup({ enforce: false });
+        assert.equal((await getState()).operation, null);
+
+        assert.deepEqual(await startEnforcing(), { success: true });
+        assert.equal((await getState()).startupMode, false);
+    });
+
+    it('with startup operations in several windows leaves everything else unchanged', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        const before = await savedState();
+        const tabsBefore = [...harness.tabIds(1), ...harness.tabIds(2)].sort();
+
+        await startEnforcing();
+        const after = await savedState();
+
+        assert.equal(after.startupMode, false);
+        assert.deepEqual(after.windows, before.windows, 'allowances, kinds, statuses and revisions are unchanged');
+        assert.deepEqual([...harness.tabIds(1), ...harness.tabIds(2)].sort(), tabsBefore, 'no tab closed');
+    });
+
+    it('is idempotent', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        await startEnforcing();
+        const once = await savedState();
+        assert.deepEqual(await startEnforcing(), { success: true });
+        assert.deepEqual(await startEnforcing(), { success: true });
+        assert.deepEqual(await savedState(), once);
+    });
+
+    it('stays off after a worker restart and comes back on after a browser restart', async () => {
+        await setup({ enforce: false });
+        await startEnforcing();
+
+        await workerRestart();
+        assert.equal((await getState()).startupMode, false);
+
+        await browserRestart();
+        assert.equal((await getState()).startupMode, true);
+    });
+
+    it('applies the normal cap to later creations, including in a window that still holds startup excess', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        await startEnforcing();
+
+        const pending = await openMany(5);
+        const rejected = await open();
+
+        for (const id of pending) assert.ok(harness.tabIds(1).includes(id), 'pending up to the cap');
+        assert.equal(harness.tabIds(1).includes(rejected), false, 'then rejected');
+    });
+
+    it('decides a creation queued before the command in startup mode', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+
+        // Hold the creation task part-way so the command queues up behind it
+        let release;
+        const gate = new Promise((resolve) => (release = resolve));
+        const realGet = harness.chrome.storage.local.get.bind(harness.chrome.storage.local);
+        let held = false;
+        harness.chrome.storage.local.get = async (...args) => {
+            if (!held) {
+                held = true;
+                await gate;
+            }
+            return realGet(...args);
+        };
+
+        const early = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://early.example/' });
+        await flush();
+        const response = startEnforcing(); // queued behind the held creation
+        await flush();
+        release();
+        await response;
+        await flush();
+
+        const late = await open();
+        const op = await getOp();
+        assert.equal(op.tabs.find((t) => t.id === early).status, 'startup', 'decided before the command');
+        assert.equal(op.tabs.find((t) => t.id === late).status, 'pending', 'decided after the command');
+        assert.equal(op.rejectedCount, 0);
+    });
+
+    it('refuses an untrusted sender', async () => {
+        await setup({ enforce: false });
+        for (const sender of [
+            { id: EXTENSION_ID, url: 'https://evil.example/' },
+            { id: 'other-extension', url: 'chrome-extension://other-extension/x.html' }
+        ]) {
+            const response = await cmd({ action: 'startEnforcing' }, sender);
+            assert.equal(response.success, false);
+        }
+        assert.equal((await getState()).startupMode, true);
+    });
+
+    it('tells open popups, and getState no longer reports startup mode', async () => {
+        await setup({ enforce: false, tabs: overLimitSession() });
+        const { messages } = harness.connectPort();
+
+        await startEnforcing();
+        await flush();
+
+        const last = messages.at(-1);
+        assert.equal(last.type, 'state');
+        assert.equal(last.startupMode, false);
+        assert.equal((await getState()).startupMode, false);
+    });
+
+    it('ignores ports from untrusted pages', async () => {
+        await setup({ enforce: false });
+        const { port, messages } = harness.connectPort({ id: EXTENSION_ID, url: 'https://evil.example/' });
+        await startEnforcing();
+        await flush();
+        assert.deepEqual(messages, []);
+        assert.ok(port);
+    });
+});
+
+// ---------------------------------------------------------- message security
+
 describe('message security', () => {
-    it('rejects messages from web pages', async () => {
-        await hitTheLimit();
-        const response = await harness.sendMessage(
+    beforeEach(() => setup());
+
+    it('rejects messages from web pages and other extensions', async () => {
+        await open();
+        const op = await getOp();
+        const request = { action: 'closeSelected', ...decide(op, { tabIds: [1] }) };
+
+        assert.deepEqual(await cmd(request, { id: EXTENSION_ID, url: 'https://evil.example/' }), {
+            success: false,
+            error: 'Untrusted sender'
+        });
+        assert.equal((await cmd({ action: 'getState', windowId: 1 }, { id: 'x', url: 'chrome-extension://x/a.html' })).success, false);
+        assert.ok(harness.tabIds(1).includes(1));
+    });
+
+    it('rejects unknown actions, the removed legacy actions and malformed fields', async () => {
+        for (const request of [
+            { action: 'closeAllTabs' },
+            { action: 'tabSelected', tabId: 1, windowId: 1, newTabId: 3 },
             { action: 'tabSelectedForReplacement', tabId: 2, windowId: 1 },
-            { id: EXTENSION_ID, url: 'https://evil.example/' }
-        );
-        await flush();
-
-        assert.deepEqual(response, { success: false, error: 'Untrusted sender' });
-        assert.ok(harness.tabIds(1).includes(2));
-    });
-
-    it('rejects messages from other extensions', async () => {
-        const response = await harness.sendMessage(
             { action: 'getSelectorState' },
-            { id: 'some-other-extension', url: 'chrome-extension://some-other-extension/x.html' }
-        );
-        assert.equal(response.success, false);
+            { action: 'closeSelected', windowId: 1, opId: 'x', revision: 1, tabIds: ['2'] },
+            { action: 'closeSelected', windowId: 1, opId: 'x', revision: 1, tabIds: [] },
+            { action: 'closePending', windowId: '1', opId: 'x', revision: 1 }
+        ]) {
+            assert.equal((await cmd(request)).success, false, JSON.stringify(request));
+        }
+        assert.deepEqual(harness.tabIds(1).sort(), [1, 2, 3]);
     });
 
-    it('rejects unknown actions and malformed IDs', async () => {
-        assert.equal((await harness.sendMessage({ action: 'closeAllTabs' }, POPUP)).success, false);
-        assert.equal(
-            (await harness.sendMessage({ action: 'tabSelectedForReplacement', tabId: '2', windowId: 1 }, POPUP)).success,
-            false
-        );
-    });
-
-    it('legacy tabSelected cannot close arbitrary tabs', async () => {
-        const response = await harness.sendMessage({ action: 'tabSelected', tabId: 1, windowId: 1, newTabId: 3 }, POPUP);
-        await flush();
-
+    it('keepThese is refused for a normal operation', async () => {
+        await open();
+        const op = await getOp();
+        const response = await cmd({ action: 'keepThese', ...decide(op) });
         assert.equal(response.success, false);
-        assert.deepEqual(harness.tabIds(1).sort(), [1, 2, 3], 'neither tab may be closed');
-    });
-
-    it('legacy cancelSelection cannot close arbitrary tabs', async () => {
-        const response = await harness.sendMessage({ action: 'cancelSelection', newTabId: 3, windowId: 1 }, POPUP);
-        await flush();
-
-        assert.equal(response.success, false);
-        assert.ok(harness.tabIds(1).includes(3));
     });
 });

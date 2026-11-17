@@ -92,14 +92,22 @@ export function createChromeMock({ tabs = [] } = {}) {
         tabsOnCreated: createEvent(),
         tabsOnRemoved: createEvent(),
         tabsOnUpdated: createEvent(),
+        tabsOnAttached: createEvent(),
+        tabsOnDetached: createEvent(),
+        tabsOnReplaced: createEvent(),
         windowsOnRemoved: createEvent(),
-        runtimeOnMessage: createEvent()
+        runtimeOnMessage: createEvent(),
+        runtimeOnConnect: createEvent()
     };
 
     // Chrome fires events asynchronously, after the API call resolves
     const fireLater = (event, ...args) => setImmediate(() => event._fire(...args));
 
-    const calls = { openPopup: 0, windowsCreate: [] };
+    const calls = { openPopup: 0, windowsCreate: [], badge: '', removeAttempts: [] };
+
+    // Failure injection. Set a predicate (tabId) => boolean, or a flag.
+    const failures = { removeTab: null, openPopup: false };
+    const groups = []; // [{ id, windowId, title, color }] returned by tabGroups.query
 
     const chrome = {
         runtime: {
@@ -124,10 +132,17 @@ export function createChromeMock({ tabs = [] } = {}) {
             },
             async remove(tabIds) {
                 for (const id of [].concat(tabIds)) {
+                    calls.removeAttempts.push(id);
+                    if (failures.removeTab && failures.removeTab(id)) {
+                        throw new Error(`Injected failure removing tab ${id}.`);
+                    }
                     const tab = tabMap.get(id);
                     if (!tab) throw new Error(`No tab with id: ${id}.`);
                     tabMap.delete(id);
-                    fireLater(events.tabsOnRemoved, id, { windowId: tab.windowId, isWindowClosing: false });
+                    // Closing a window's last tab closes the window
+                    const windowEmptied = ![...tabMap.values()].some((t) => t.windowId === tab.windowId);
+                    fireLater(events.tabsOnRemoved, id, { windowId: tab.windowId, isWindowClosing: windowEmptied });
+                    if (windowEmptied) fireLater(events.windowsOnRemoved, tab.windowId);
                 }
             },
             async create({ windowId, url = 'chrome://newtab/', active = true } = {}) {
@@ -137,7 +152,10 @@ export function createChromeMock({ tabs = [] } = {}) {
             },
             onCreated: events.tabsOnCreated,
             onRemoved: events.tabsOnRemoved,
-            onUpdated: events.tabsOnUpdated
+            onUpdated: events.tabsOnUpdated,
+            onAttached: events.tabsOnAttached,
+            onDetached: events.tabsOnDetached,
+            onReplaced: events.tabsOnReplaced
         },
         windows: {
             async getAll() {
@@ -151,33 +169,99 @@ export function createChromeMock({ tabs = [] } = {}) {
             onRemoved: events.windowsOnRemoved
         },
         tabGroups: {
-            async query() {
-                return [];
+            async query({ windowId } = {}) {
+                return groups.filter((g) => windowId === undefined || g.windowId === windowId).map((g) => ({ ...g }));
             }
         },
         action: {
             async openPopup() {
                 calls.openPopup++;
-            }
+                if (failures.openPopup) throw new Error('Cannot open popup');
+            },
+            async setBadgeText({ text }) {
+                calls.badge = text;
+            },
+            async setBadgeBackgroundColor() {}
         }
     };
+    chrome.runtime.onConnect = events.runtimeOnConnect;
 
     // Test-only helpers, kept off the API surface the extension sees
     const harness = {
         chrome,
         calls,
+        failures,
+        groups,
         tabIds: (windowId) =>
             [...tabMap.values()].filter((t) => windowId === undefined || t.windowId === windowId).map((t) => t.id),
         findTab: (predicate) => [...tabMap.values()].find(predicate),
+        // A tab that exists but whose onCreated nobody heard (e.g. the worker was down)
+        addTabSilently(tab) {
+            return addTab({ id: nextTabId++, ...tab }).id;
+        },
         // Simulate the user opening a tab: Chrome adds it, then fires onCreated
         userOpensTab(tab) {
             const full = addTab({ id: nextTabId++, ...tab });
             fireLater(events.tabsOnCreated, structuredClone(full));
             return full.id;
         },
-        // Drop all registered listeners (simulates the service worker being torn down)
+        // Drop all registered listeners (simulates the service worker being torn down).
+        // chrome.storage.session survives, like a real worker restart.
         resetListeners() {
             Object.values(events).forEach((e) => e._listeners.clear());
+        },
+        // A browser restart or extension reload: listeners gone AND session storage cleared
+        async restartBrowser() {
+            Object.values(events).forEach((e) => e._listeners.clear());
+            await chrome.storage.session.clear();
+        },
+        // Simulate the user dragging a tab to another window (Chrome fires detach, then attach)
+        moveTab(tabId, newWindowId, { groupId = -1 } = {}) {
+            const tab = tabMap.get(tabId);
+            const oldWindowId = tab.windowId;
+            tab.windowId = newWindowId;
+            tab.groupId = groupId;
+            fireLater(events.tabsOnDetached, tabId, { oldWindowId, oldPosition: 0 });
+            fireLater(events.tabsOnAttached, tabId, { newWindowId, newPosition: 0 });
+        },
+        // Put a tab into a group (or -1 to ungroup it)
+        setGroup(tabId, groupId) {
+            const tab = tabMap.get(tabId);
+            tab.groupId = groupId;
+            fireLater(events.tabsOnUpdated, tabId, { groupId }, structuredClone(tab));
+        },
+        navigate(tabId, url) {
+            const tab = tabMap.get(tabId);
+            tab.url = url;
+            fireLater(events.tabsOnUpdated, tabId, { url }, structuredClone(tab));
+        },
+        retitle(tabId, title) {
+            const tab = tabMap.get(tabId);
+            tab.title = title;
+            fireLater(events.tabsOnUpdated, tabId, { title }, structuredClone(tab));
+        },
+        // Chrome swaps a tab for another one (e.g. prerender); the old ID disappears
+        replaceTab(oldId, newId) {
+            const tab = tabMap.get(oldId);
+            tabMap.delete(oldId);
+            tabMap.set(newId, { ...tab, id: newId });
+            fireLater(events.tabsOnReplaced, newId, oldId);
+        },
+        // A popup connecting to the background; returns the messages the background pushed
+        connectPort(sender = { id: EXTENSION_ID, url: `${EXTENSION_ORIGIN}popup.html` }) {
+            const messages = [];
+            const port = {
+                name: 'popup',
+                sender,
+                onDisconnect: createEvent(),
+                onMessage: createEvent(),
+                postMessage: (m) => messages.push(structuredClone(m)),
+                disconnect() {
+                    port.onDisconnect._fire(port);
+                }
+            };
+            events.runtimeOnConnect._fire(port);
+            return { port, messages };
         },
         // Deliver a runtime message to the background listener(s) and await the response
         sendMessage(request, sender = { id: EXTENSION_ID, url: `${EXTENSION_ORIGIN}popup.html` }) {
