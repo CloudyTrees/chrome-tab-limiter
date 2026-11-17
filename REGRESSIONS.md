@@ -763,3 +763,122 @@ Tell me if you want it the other way.
   next combination easier to reason about than the earlier layered patches.
 
 Not pushed. Committed as one commit.
+
+---
+
+## Codex verification of the third fix round (2026-11-17)
+
+Reviewed commit `65af38215f03533fa096ee59f64a28abf6017f49` on `sh-dev`.
+Source locations in this section refer to that revision.
+
+**Verdict: the previous six independent probes pass, including REG-01b and the
+reported REG-04c sequence. One cap-enforcement failure remains in the deliberate
+retry-exhaustion fallback. Do not sign off on complete resolution yet.**
+
+### Verification performed
+
+- Ran the complete repository suite: **217 passed, 0 failed, 53 suites**.
+- Re-ran the four independent probes from the first fix verification and the
+  two interaction probes from the second in a temporary snapshot. **All six
+  passed**. In particular:
+  - The moved-and-replaced tab remained open, with no removal attempted and no
+    rejected count recorded.
+  - Changing window 2's limit during three successive admissions in window 1
+    left window 1 at eight tabs and five pending, with three rejections. The
+    unrelated-window settings failure is fixed.
+- Checked Claude's six new tests against the previous `background.js` from
+  `fe0b595`, in the temporary copy only: **2 failed and 4 controls passed**,
+  matching the report. Restored the fixed source afterward.
+- Ran an additional probe that exhausts the retry budget on three successive
+  creations, then opens an ordinary fourth tab. Its cap assertion failed as
+  detailed below.
+- Verified that HEAD and every tracked repository file's hash remained
+  unchanged after investigation. An untracked
+  `chrome-tab-limiter/.background.js.swp` was present at the start and was left
+  untouched. Only this document is changed by the subsequent review commit.
+
+### REG-04d — Repeated retry exhaustion still accumulates pending tabs
+
+**Locations:** `chrome-tab-limiter/background.js:435,509–513,529–541`;
+tests at `tests/background.test.js:1405,1429`.
+
+**Severity:** P2, correctness and compliance with the approved cap-only rule.
+This requires repeated settings changes during the admission task; no ordinary
+single-change or live-browser reproduction is claimed.
+
+Use the shared mock setup: window 1 has three ordinary tabs, its default limit
+is 3, startup mode is off, and the pending cap is 5. Open five pending tabs
+sequentially, draining events after each, so the window has eight tabs.
+
+1. Open the next new tab in window 1 and wrap `tabs.get` for that ID.
+2. On calls 3, 6 and 9 for that ID, toggle `tabLimit_1` between 3 and 4 using
+   `storage.local.set`. These are the final rejection lookups on each attempt.
+3. After each settings write, await `flush(1)` before returning the real lookup,
+   so the relevant settings event is delivered during every attempt.
+4. Drain the queue completely and query `getState`. Restore the lookup wrapper.
+5. Repeat for two further new tabs, continuing to alternate the same two valid
+   limits. The ungrouped limit and pending cap remain 3 and 5 throughout.
+6. Finally open one more new tab without changing settings and drain the queue.
+
+**Observed after each fully reconciled retry-exhausting creation:**
+
+| Creation | Final window limit | Window tabs | Pending | Rejected count |
+| --- | --- | --- | --- | --- |
+| First | 4 | 9 | 6 | 0 |
+| Second | 3 | 10 | 7 | 0 |
+| Third | 4 | 11 | 8 | 0 |
+
+All three tabs remain open. The following ordinary creation is rejected, but
+the pending count **stays at eight** after reconciliation. No cap reduction,
+startup allowance or movement is involved.
+
+**Expected:** Exhausting a retry budget must not grant an extra pending slot
+beyond the approved cap. A new tab still needs an admission decision under the
+current settings. Relevant changes may defer that decision; they must not
+silently change the cap-only behavior in `HUMAN-DECISION.md`.
+
+On the third invalidated attempt, the code converts `reject` into `pending`
+without checking the cap. That entry is then persisted. Reconciliation neither
+reclassifies it nor retries its admission, and each later creation gets a fresh
+three-attempt budget. Therefore the same fallback can add another pending tab
+each time it is reached. Alternating 3 and 4 avoids any need for ever-larger
+limit values.
+
+Claude explicitly disclosed the single-creation exception, but the claims that
+it is bounded and no longer accumulates are not supported by this result. The
+number of attempts is bounded per creation; the total number of extra pending
+tabs has no bound imposed by this path. Enforcing the cap on a subsequent
+ordinary creation stops that particular tab, but does not undo earlier excess
+admissions.
+
+The existing retry-exhaustion test checks that one tab is kept. The test named
+"the next ordinary creation is still held to the cap afterwards" starts with
+five pending tabs and changes an unrelated window's setting; it does not first
+exhaust the retry budget. Even exercising an actual ordinary creation after an
+overshoot, as this probe does, would not establish that repeated exhaustion
+cannot accumulate.
+
+**Fix direction:** On retry exhaustion, defer the still-undecided admission to
+an explicitly owned follow-up task instead of recording it as an additional
+pending tab. Let queued settings changes run, then classify it under current
+rules exactly once. Preserve movement and startup protections, and do not close
+tabs that had already been admitted as pending merely because a cap was later
+lowered. Keep the approved cap-only policy unless the owner explicitly changes
+it; this verification does not authorize a new exception.
+
+### Acceptance and limits
+
+The previous REG-01b movement/replacement sequence and REG-04c unrelated-window
+sequence are now fixed in the exercised cases. No new automatic-closure failure
+was found in this round. Add coverage and address REG-04d before claiming the
+pending-cap issue is completely resolved.
+
+All additional probes in this review are deterministic mock interleavings,
+**not live Chrome reproductions**. Codex did not independently repeat Claude's
+live browser checks. The earlier limitations concerning emulated session
+restoration and extension reload remain. This finding does not claim a
+data-collection risk or external security exploit, or require an atomic
+check-and-close guarantee from asynchronous Chrome APIs.
+
+Only this document is committed by Codex. No runtime fixes, test changes, push
+or merge are included; the pre-existing untracked swap file is excluded.
