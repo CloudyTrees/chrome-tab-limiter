@@ -2115,3 +2115,73 @@ it. I see no reason to change the behavior.
 I have no other open points. With D4 recorded, the remaining gate is the
 owner's approval of the consolidated plan; step 1 (the independent fixes) can
 then start.
+
+---
+
+## Implementation record and live Chrome validation (steps 1–6)
+
+Written on 2026-11-16 after the owner locked the plan. One commit per step, tests
+in the same commit, nothing pushed.
+
+| Step | Commit | Result |
+| --- | --- | --- |
+| 1. Independent fixes | `4fe6387` | B-06, B-08, B-09, `minimum_chrome_version` 127, `*.pem` excluded from backups, `tabs` permission explained. |
+| 2. `utils/limits.js` | `c968265` | Pure arithmetic with tests, including R1 and C1. |
+| 3. State store, queue, background rewrite | `c670fb2` | Test groups 1–4, D4 command, R1–R4. |
+| 4. Popup, options cap, selector removed | `140520a` | Decision view, B-07, D3, `maxPendingPerWindow`, test group 5. |
+| 5. Privacy text and §8 disclosures | `2ef0bf8` | README and options text match the implementation. |
+| 6. Live Chrome checklist | this commit | Results below. 182 unit tests pass. |
+
+### Deviations from the plan, for the owner
+
+These are implementation details that serve the plan's stated tests. None changes
+a product rule in `HUMAN-DECISION.md`.
+
+1. **Unannounced tabs are not counted.** §5 says to exclude "other undecided tabs",
+   but a tab can exist before its `onCreated` reaches the worker. In a burst, the
+   first tabs were then counted against the tabs behind them and wrongly became
+   pending, so the burst admitted fewer tabs than the capacity. The worker now also
+   ignores tabs whose ID is above the highest creation event it has heard of (Chrome
+   assigns IDs in increasing order). Found by the mock burst test, and the live burst
+   below matches the ideal result.
+2. **`getState` also returns `startupOperations`**, the number of windows holding a
+   startup operation, so the popup can show D4's note ("a window still over its limit
+   stays open") only when it applies.
+3. **The pending cap is read from `maxPendingPerWindow`** and falls back to 5 when the
+   stored value is missing or outside 1–10.
+
+### Live Chrome results
+
+**Method.** Chrome 157.0.8103.79 (stable, macOS), a throwaway profile in the
+scratchpad, never the owner's profile. Branded Chrome ignores `--load-extension`, so
+the unpacked folder was loaded with the DevTools `Extensions.loadUnpacked` command
+over `--remote-debugging-pipe`. The extension was driven from its own `options.html`
+page (an extension page, so `chrome.tabs`, `chrome.runtime.sendMessage` and
+`chrome.storage.session` were available) while nothing was attached to its service
+worker. Everything ran headless except the popup check, which needs a real window.
+The scripts are in the session scratchpad and were not added to the repository.
+
+| Checklist item | Result |
+| --- | --- |
+| Event ordering | Pass at every checkpoint. After each batch of creates, moves, group changes and commands, the tab counts and the pending, moved and rejected numbers matched what the events should produce, and the revision only ever increased. Not checked: the exact order in which Chrome delivered each event. |
+| Startup mode | Pass. 5 tabs opened in a window over its limit (3): all 6 kept, operation kind `startup`, badge `3`. |
+| Start enforcing now (D4), then the cap | Pass. After the command, 6 more tabs gave 5 pending and 1 rejected (11 tabs), and startup mode stayed off. |
+| Burst | Pass. 12 tabs created at once in a window with 1 tab (limit 3): 8 tabs stay open, 5 pending, 5 rejected. This is the ideal result and exactly the case that exposed deviation 1. |
+| Dragging between windows and groups | Pass, with `chrome.tabs.move` and `chrome.tabs.group`, which fire the same `onDetached`, `onAttached` and `onUpdated` events as a drag (a real mouse drag was not performed). A tab moved into a full window stayed open as `moved` and was not rejected (rejected count unchanged). A pending tab moved to a window with room resolved. A tab added to a full group became `moved`. |
+| Commands | Pass. `closePending` closed only the pending tabs. Replaying the same command was refused with "The tabs changed; please review again". |
+| Worker suspension | Pass. With nothing attached, Chrome terminated the worker after 30 s. A new tab then woke it, the same operation ID was still there (revision 25 → 27), the tab joined as pending, and startup mode stayed off. |
+| Browser start with an over-limit session | Pass, emulated. 7 tabs were open before the extension loaded and 5 more appeared while it was initializing: all 12 kept, one startup operation with 12 startup tabs, badge `9`, nothing rejected. After a worker idle-out and wake-up, startup mode was still on. "Keep these" then set the window and ungrouped allowances to 12, ended startup mode and cleared the operation. |
+| Extension reload with an operation open | Pass, emulated. Loading the same folder again created a fresh state: startup mode on, three windows (11, 5 and 4 tabs) each with a startup operation, and no tab closed. |
+| Popup opening automatically | Pass in a real window; fails headless. In headed Chrome a tab going over the limit opened `popup.html` on its own, and the popup showed the decision view with "Window: 1 over (limit 2)" and the 3 tabs. In headless Chrome `chrome.action.openPopup` rejects with "Failed to open popup.", which is the case the badge covers. |
+
+**Not tested exactly as a person would:**
+- a real mouse drag, and the real "Reload" button on `chrome://extensions` (`runtime.reload()` left a CDP-loaded extension disabled, so a second `loadUnpacked` of the same folder stood in for it);
+- a real session restore. The restored tabs were opened before the extension loaded and others while it initialized, but Chrome's own restore ordering was not reproduced.
+
+**One thing that looked like a bug and was not:** a group test first failed because
+`chrome.tabs.group` without `createProperties.windowId` creates the group in the
+current window and moves the tabs there. The extension handled the resulting events
+correctly.
+
+Open items: none for the plan. Nothing has been pushed and the branch `sh-dev` has
+not been merged.
