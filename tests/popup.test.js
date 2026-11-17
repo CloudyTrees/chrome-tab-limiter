@@ -8,25 +8,50 @@ import { createChromeMock, flush } from './helpers/chrome-mock.js';
 
 function createElement(id) {
     const listeners = {};
-    return {
+    const node = {
         id,
+        tag: '',
         value: '',
         textContent: '',
         className: '',
         innerHTML: '',
         disabled: false,
+        hidden: false,
+        checked: false,
         style: {},
         dataset: {},
+        attributes: {},
+        children: [],
+        setAttribute(name, value) {
+            node.attributes[name] = value;
+        },
+        appendChild(child) {
+            node.children.push(child);
+            return child;
+        },
+        replaceChildren(...nodes) {
+            node.children = nodes;
+        },
         addEventListener: (type, fn) => {
             (listeners[type] ||= []).push(fn);
         },
         _fire: (type, event = {}) => Promise.all((listeners[type] || []).map((fn) => fn(event)))
     };
+    return node;
+}
+
+// All descendants of a node that satisfy a predicate
+function findAll(node, predicate, found = []) {
+    for (const child of node.children) {
+        if (predicate(child)) found.push(child);
+        findAll(child, predicate, found);
+    }
+    return found;
 }
 
 let instance = 0;
 
-async function openPopup(chrome, { windowId = 1, groupRows = [] } = {}) {
+async function openPopup(chrome, { windowId = 1, groupRows = [], onMessage } = {}) {
     const elements = new Map();
     const getElement = (id) => {
         if (!elements.has(id)) elements.set(id, createElement(id));
@@ -42,6 +67,7 @@ async function openPopup(chrome, { windowId = 1, groupRows = [] } = {}) {
             (documentListeners[type] ||= []).push(fn);
         },
         getElementById: (id) => groupInputs.find((input) => input.id === id) || getElement(id),
+        createElement: (tag) => Object.assign(createElement(), { tag }),
         querySelector: (selector) =>
             selector.endsWith('.group-save-btn')
                 ? groupButtons.find((button) => selector.includes(`"${button.dataset.groupId}"`)) || null
@@ -50,16 +76,33 @@ async function openPopup(chrome, { windowId = 1, groupRows = [] } = {}) {
             selector === '.group-limit-input' ? groupInputs : selector === '.group-save-btn' ? groupButtons : [],
         body: {}
     };
-    globalThis.window = { close() {} };
+    const sent = [];
+    const pushListeners = [];
+    let closed = 0;
+    globalThis.window = {
+        close() {
+            closed++;
+        }
+    };
     chrome.windows = { ...chrome.windows, getCurrent: async () => ({ id: windowId }) };
-    chrome.runtime.sendMessage = async () => ({ success: false });
+    chrome.runtime.sendMessage = async (request) => {
+        sent.push(request);
+        return onMessage ? onMessage(request) : { success: false };
+    };
+    chrome.runtime.connect = () => ({ onMessage: { addListener: (fn) => pushListeners.push(fn) } });
     globalThis.chrome = chrome;
 
     await import(new URL(`../chrome-tab-limiter/popup.js?popup=${++instance}`, import.meta.url));
     for (const fn of documentListeners.DOMContentLoaded) await fn();
     await flush();
 
-    return { getElement, documentListeners };
+    return {
+        getElement,
+        documentListeners,
+        sent,
+        closeCalls: () => closed,
+        push: (message) => pushListeners.forEach((fn) => fn(message))
+    };
 }
 
 let harness;
@@ -184,5 +227,224 @@ describe('group limits (B-09)', () => {
         const source = readFileSync(new URL('../chrome-tab-limiter/popup.js', import.meta.url), 'utf8');
         assert.match(source, /min="1" max="100" data-group-id/);
         assert.doesNotMatch(source, /max="50"/);
+    });
+});
+
+
+// ------------------------------------------------------------- decision view
+
+describe('decision view (plan §6)', () => {
+    const tab = (id, title, extra = {}) => ({ id, title, groupId: -1, status: 'ordinary', reduces: ['window'], ...extra });
+
+    const operation = (overrides = {}) => ({
+        opId: 'op-1',
+        revision: 4,
+        kind: 'normal',
+        phase: 'open',
+        rejectedCount: 0,
+        constraints: [{ id: 'window', scope: 'window', count: 4, limit: 3, capacity: 3, excess: 1 }],
+        tabs: [tab(1, 'Alpha'), tab(2, 'Beta'), tab(3, 'Gamma'), tab(4, '<b>New</b> tab', { status: 'pending' })],
+        canKeep: false,
+        pendingCount: 1,
+        canClosePending: true,
+        ...overrides
+    });
+
+    // A fake background: answers getState with `current` and records commands
+    function background(current, commandResponse = { success: true }) {
+        const calls = [];
+        const handler = (request) => {
+            calls.push(request);
+            if (request.action === 'getState') return { success: true, startupOperations: 0, ...current() };
+            return typeof commandResponse === 'function' ? commandResponse(request) : commandResponse;
+        };
+        return { handler, calls };
+    }
+
+    const checkboxes = (getElement) => findAll(getElement('tabChoiceList'), (n) => n.attributes.type === 'checkbox');
+    const tick = () => flush(5);
+
+    it('shows the operation instead of the settings, with live titles as plain text', async () => {
+        const { handler } = background(() => ({ startupMode: false, operation: operation() }));
+        const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+
+        assert.equal(getElement('decisionView').hidden, false);
+        assert.equal(getElement('settingsView').hidden, true);
+        assert.equal(getElement('constraintList').children[0].textContent, 'Window: 1 over (limit 3)');
+        const titles = findAll(getElement('tabChoiceList'), (n) => n.className === 'tab-choice-title').map((n) => n.textContent);
+        assert.deepEqual(titles, ['Alpha', 'Beta', 'Gamma', '<b>New</b> tab'], 'titles are text, never markup');
+        assert.equal(getElement('tabChoiceList').innerHTML, '', 'no innerHTML for page titles');
+    });
+
+    it('shows the normal settings view when there is no operation', async () => {
+        const { handler } = background(() => ({ startupMode: false, operation: null }));
+        const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+
+        assert.equal(getElement('decisionView').hidden, true);
+        assert.equal(getElement('settingsView').hidden, false);
+    });
+
+    it('enables "Close selected tabs" only when the selection resolves every constraint', async () => {
+        const { handler } = background(() => ({ startupMode: false, operation: operation() }));
+        const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+        const [first, second] = checkboxes(getElement);
+
+        assert.equal(getElement('closeSelectedButton').disabled, true, 'nothing selected');
+        first.checked = true;
+        await first._fire('change');
+        assert.equal(getElement('closeSelectedButton').disabled, false, 'one tab resolves 1 over');
+        first.checked = false;
+        await first._fire('change');
+        assert.equal(getElement('closeSelectedButton').disabled, true);
+        assert.ok(second);
+    });
+
+    it('sends the chosen tabs with the operation ID and revision', async () => {
+        const { handler, calls } = background(() => ({ startupMode: false, operation: operation() }));
+        const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+        const [first] = checkboxes(getElement);
+        first.checked = true;
+        await first._fire('change');
+
+        await getElement('closeSelectedButton')._fire('click');
+
+        const command = calls.find((c) => c.action === 'closeSelected');
+        assert.deepEqual(command, { action: 'closeSelected', tabIds: [1], windowId: 1, opId: 'op-1', revision: 4 });
+    });
+
+    it('B-07: a rejected command keeps the popup open, shows the reason and refreshes', async () => {
+        const { handler, calls } = background(
+            () => ({ startupMode: false, operation: operation() }),
+            { success: false, error: 'The tabs changed; please review again' }
+        );
+        const { getElement, closeCalls } = await openPopup(harness.chrome, { onMessage: handler });
+        const [first] = checkboxes(getElement);
+        first.checked = true;
+        await first._fire('change');
+        const before = calls.filter((c) => c.action === 'getState').length;
+
+        await getElement('closeSelectedButton')._fire('click');
+
+        assert.equal(getElement('statusMessage').textContent, 'The tabs changed; please review again');
+        assert.equal(getElement('statusMessage').className, 'status-message error');
+        assert.equal(closeCalls(), 0, 'the popup stays open');
+        assert.equal(getElement('decisionView').hidden, false, 'the operation is still shown');
+        assert.ok(calls.filter((c) => c.action === 'getState').length > before, 'the view was refreshed');
+        assert.equal(calls.some((c) => c.action === 'clearSelectorState'), false, 'the old discard message is gone');
+    });
+
+    it('closes the popup after a decision that resolves the operation', async () => {
+        let current = { startupMode: false, operation: operation() };
+        const { handler } = background(() => current, () => {
+            current = { startupMode: false, operation: null };
+            return { success: true };
+        });
+        const { getElement, closeCalls } = await openPopup(harness.chrome, { onMessage: handler });
+        const [first] = checkboxes(getElement);
+        first.checked = true;
+        await first._fire('change');
+
+        await getElement('closeSelectedButton')._fire('click');
+
+        assert.equal(closeCalls(), 1);
+    });
+
+    it('offers "Keep these" only for a startup operation', async () => {
+        let current = { startupMode: false, operation: operation() };
+        const { handler } = background(() => current);
+        const normal = await openPopup(harness.chrome, { onMessage: handler });
+        assert.equal(normal.getElement('keepTheseButton').hidden, true);
+
+        current = { startupMode: true, operation: operation({ kind: 'startup', canKeep: true }) };
+        const startup = await openPopup(harness.chrome, { onMessage: handler });
+        assert.equal(startup.getElement('keepTheseButton').hidden, false);
+        assert.equal(startup.getElement('decisionTitle').textContent, 'Tabs left over from the last browser start');
+    });
+
+    it('hides "Close the new tabs" and explains why when it would close the window (R4)', async () => {
+        const { handler } = background(() => ({
+            startupMode: false,
+            operation: operation({ canClosePending: false, pendingCount: 2 })
+        }));
+        const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+
+        assert.equal(getElement('closePendingButton').hidden, true);
+        assert.equal(getElement('closePendingNote').hidden, false);
+    });
+
+    it('announces rejected tabs', async () => {
+        const { handler } = background(() => ({ startupMode: false, operation: operation({ rejectedCount: 2 }) }));
+        const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+
+        assert.equal(getElement('rejectedNotice').hidden, false);
+        assert.match(getElement('rejectedNotice').textContent, /2 new tabs were closed/);
+    });
+
+    describe('"Start enforcing now" (D4)', () => {
+        it('shows in the settings view and the operation view while startup mode is on', async () => {
+            for (const op of [null, operation({ kind: 'startup', canKeep: true })]) {
+                const { handler } = background(() => ({ startupMode: true, operation: op }));
+                const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+                assert.equal(getElement('startEnforcingSection').hidden, false, op ? 'operation view' : 'settings view');
+            }
+        });
+
+        it('is hidden once startup mode is off', async () => {
+            const { handler } = background(() => ({ startupMode: false, operation: null }));
+            const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+            assert.equal(getElement('startEnforcingSection').hidden, true);
+        });
+
+        it('warns that a window still over its limit stays open, only when one exists', async () => {
+            for (const [startupOperations, hidden] of [[0, true], [1, false]]) {
+                const answer = (request) =>
+                    request.action === 'getState'
+                        ? { success: true, startupMode: true, startupOperations, operation: null }
+                        : { success: true };
+                const { getElement } = await openPopup(harness.chrome, { onMessage: answer });
+                assert.equal(getElement('startEnforcingNote').hidden, hidden, `startupOperations ${startupOperations}`);
+            }
+        });
+
+        it('sends a global command without a window, operation or revision, then hides the button', async () => {
+            let startupMode = true;
+            const { handler, calls } = background(() => ({ startupMode, operation: null }), () => {
+                startupMode = false;
+                return { success: true };
+            });
+            const { getElement } = await openPopup(harness.chrome, { onMessage: handler });
+
+            await getElement('startEnforcingButton')._fire('click');
+
+            assert.deepEqual(calls.find((c) => c.action === 'startEnforcing'), { action: 'startEnforcing' });
+            assert.equal(getElement('startEnforcingSection').hidden, true);
+        });
+
+        it('refreshes when the background says startup mode ended, and when the revision changes', async () => {
+            let current = { startupMode: true, operation: operation({ kind: 'startup', canKeep: true }) };
+            const { handler, calls } = background(() => current);
+            const { getElement, push } = await openPopup(harness.chrome, { onMessage: handler });
+            const [first] = checkboxes(getElement);
+            first.checked = true;
+            await first._fire('change');
+            assert.equal(getElement('closeSelectedButton').disabled, false);
+
+            // Another window decided: startup mode ended everywhere
+            current = { startupMode: false, operation: operation({ kind: 'startup', canKeep: true }) };
+            push({ type: 'state', startupMode: false, revisions: { 1: 4 } });
+            await tick();
+            assert.equal(getElement('startEnforcingSection').hidden, true);
+
+            // A tab changed: new revision clears the selection
+            const [again] = checkboxes(getElement);
+            again.checked = true;
+            await again._fire('change');
+            current = { startupMode: false, operation: operation({ revision: 5 }) };
+            const before = calls.filter((c) => c.action === 'getState').length;
+            push({ type: 'state', startupMode: false, revisions: { 1: 5 } });
+            await tick();
+            assert.ok(calls.filter((c) => c.action === 'getState').length > before);
+            assert.equal(getElement('closeSelectedButton').disabled, true, 'selection cleared');
+        });
     });
 });

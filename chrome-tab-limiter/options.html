@@ -14,6 +14,22 @@
         </header>
 
         <main class="content">
+            <!-- Enforcement -->
+            <section class="section">
+                <h2>New Tabs Over the Limit</h2>
+                <div class="subsection">
+                    <h3>Max pending tabs per window</h3>
+                    <p class="description">
+                        When a window is over its limit, new tabs stay open and wait for your decision. After this many, further new tabs are closed until you decide. Lowering this number never closes tabs that are already waiting.
+                    </p>
+                    <div class="action-group">
+                        <input type="number" id="maxPendingInput" min="1" max="10" placeholder="5">
+                        <button id="saveMaxPendingButton" class="primary-btn">Save</button>
+                        <div id="maxPendingStatus" class="status-message"></div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Data Management Section -->
             <section class="section">
                 <h2>Data Management</h2>
@@ -121,6 +137,6 @@
     </div>
 
     <script src="utils/export-import.js"></script>
-    <script src="options.js"></script>
+    <script type="module" src="options.js"></script>
 </body>
 </html>

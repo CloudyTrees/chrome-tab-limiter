@@ -1,6 +1,7 @@
 // Popup script for Tab Limiter extension
 import { escapeHtml } from './utils/sanitize.js';
 import { parseLimitInput } from './utils/validation.js';
+import { remainingNeeds, canCloseSelection } from './utils/selection.js';
 
 // Debug logging configuration
 const DEBUG_MODE = false; // Set to false in production
@@ -34,7 +35,6 @@ let refreshButton;
 let settingsButton;
 let statusMessage;
 let groupsListElement;
-let grandfatheredNotice;
 let welcomeNotice;
 
 // Current window ID
@@ -43,18 +43,6 @@ let currentWindowId = null;
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('Popup initializing...');
-    
-    // Check if selector mode is active
-    try {
-        const selectorResponse = await chrome.runtime.sendMessage({ action: 'getSelectorState' });
-        if (selectorResponse?.success && selectorResponse.selectorState?.isActive) {
-            debugLog('Selector mode active, switching to selector interface');
-            await initializeSelectorMode(selectorResponse.selectorState);
-            return;
-        }
-    } catch (error) {
-        debugLog('Error checking selector state:', error);
-    }
 
     // Get DOM elements
     currentTabCountElement = document.getElementById('currentTabCount');
@@ -67,7 +55,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     settingsButton = document.getElementById('settingsButton');
     statusMessage = document.getElementById('statusMessage');
     groupsListElement = document.getElementById('groupsList');
-    grandfatheredNotice = document.getElementById('grandfatheredNotice');
     welcomeNotice = document.getElementById('welcomeNotice');
 
     // Set up event listeners
@@ -75,6 +62,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     saveDefaultButton.addEventListener('click', handleSaveDefaultLimit);
     refreshButton.addEventListener('click', handleRefresh);
     settingsButton.addEventListener('click', handleOpenSettings);
+    setupDecisionListeners();
 
     // Add input validation
     tabLimitInput.addEventListener('input', validateTabLimitInput);
@@ -82,7 +70,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initial data load
     await loadInitialData();
-    await checkGrandfatheredStatus();
+    await refreshDecisionState();
+    connectToBackground();
     await checkFirstRun();
 
     debugLog('Popup initialized');
@@ -220,34 +209,13 @@ async function handleRefresh() {
         showMessage('Refreshing...', 'info');
 
         await loadInitialData();
-        await checkGrandfatheredStatus();
-        await checkFirstRun();
+            await checkFirstRun();
 
     } catch (error) {
         safeErrorLog('Error refreshing data', error);
         showMessage('Error refreshing data', 'error');
     } finally {
         refreshButton.disabled = false;
-    }
-}
-
-// Check grandfathered status and show notice if applicable
-async function checkGrandfatheredStatus() {
-    try {
-        const response = await chrome.runtime.sendMessage({
-            action: 'getGrandfatheredStatus',
-            windowId: currentWindowId
-        });
-        
-        if (response && response.success && response.isGrandfathered) {
-            grandfatheredNotice.style.display = 'block';
-            debugLog(`Window has grandfathered tabs: ${response.grandfatheredCount}`);
-        } else {
-            grandfatheredNotice.style.display = 'none';
-        }
-    } catch (error) {
-        safeErrorLog('Error checking grandfathered status', error);
-        grandfatheredNotice.style.display = 'none';
     }
 }
 
@@ -553,114 +521,229 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-// Initialize selector mode interface
-async function initializeSelectorMode(selectorState) {
-    debugLog('Initializing selector mode interface');
-    
-    // Hide normal popup content and show selector interface
-    document.body.innerHTML = `
-        <div class="selector-container">
-            <div class="selector-header">
-                <h2>⚠️ Tab Limit Reached!</h2>
-                <p>Select a tab to close:</p>
-            </div>
-            <div id="selectorTabList" class="selector-tab-list">
-                <div class="loading">Loading tabs...</div>
-            </div>
-            <div class="selector-actions">
-                <button id="selectorCancel" class="cancel-btn">Cancel</button>
-            </div>
-        </div>
-    `;
-    
-    // Load and display tabs for selection
-    await loadTabsForSelector(selectorState);
-    
-    // Set up cancel handler
-    document.getElementById('selectorCancel').addEventListener('click', async () => {
-        await chrome.runtime.sendMessage({ action: 'clearSelectorState' });
-        window.close();
-    });
-}
+// ----------------------------------------------------------------------------
+// Decision view: what to do when a window is over a limit (REVIEW.md plan §6)
+// ----------------------------------------------------------------------------
 
-// Load tabs for selector
-async function loadTabsForSelector(selectorState) {
+let decisionState = null; // latest getState response
+const selectedTabIds = new Set();
+let port = null;
+
+// Send a command to the background and always return a response object.
+// B-07: callers check `success`; nothing is cleared on a rejection.
+async function send(request) {
     try {
-        const tabListEl = document.getElementById('selectorTabList');
-        const tabs = await chrome.tabs.query({ windowId: selectorState.windowId });
-        
-        tabListEl.innerHTML = '';
-        
-        tabs.forEach(tab => {
-            const tabEl = document.createElement('div');
-            tabEl.className = 'selector-tab-item';
-            
-            tabEl.innerHTML = `
-                <div class="tab-info">
-                    <span class="tab-icon">📄</span>
-                    <span class="tab-title">${escapeHtml(tab.title || 'Untitled')}</span>
-                </div>
-            `;
-            
-            tabEl.addEventListener('click', () => {
-                showConfirmation(tab, selectorState);
-            });
-            
-            tabListEl.appendChild(tabEl);
-        });
-        
+        const response = await chrome.runtime.sendMessage(request);
+        return response && typeof response === 'object' ? response : { success: false, error: 'No response from the extension' };
     } catch (error) {
-        console.error('Error loading tabs for selector:', error);
-        document.getElementById('selectorTabList').innerHTML = '<div class="error">Error loading tabs</div>';
+        safeErrorLog('Error sending message', error);
+        return { success: false, error: 'Could not reach the extension' };
     }
 }
 
-// Show confirmation dialog for tab selection
-function showConfirmation(tab, selectorState) {
-    const container = document.querySelector('.selector-container');
-    
-    container.innerHTML = `
-        <div class="confirmation-header">
-            <h2>⚠️ Confirm Tab Closure</h2>
-            <p>Are you sure you want to close this tab?</p>
-        </div>
-        <div class="selected-tab">
-            <div class="tab-info">
-                <span class="tab-icon">📄</span>
-                <span class="tab-title">${escapeHtml(tab.title || 'Untitled')}</span>
-            </div>
-        </div>
-        <div class="confirmation-actions">
-            <button id="confirmClose" class="confirm-btn">Yes, Close Tab</button>
-            <button id="cancelClose" class="cancel-btn">Cancel</button>
-        </div>
-    `;
-    
-    document.getElementById('confirmClose').addEventListener('click', async () => {
-        await handleTabSelected(tab.id, selectorState);
-    });
-    
-    document.getElementById('cancelClose').addEventListener('click', () => {
-        initializeSelectorMode(selectorState); // Go back to tab list
-    });
-}
-
-// Handle tab selection in popup selector
-async function handleTabSelected(tabId, selectorState) {
-    try {
-        if (selectorState.mode === 'replace') {
-            await chrome.runtime.sendMessage({
-                action: 'tabSelectedForReplacement',
-                tabId: tabId,
-                windowId: selectorState.windowId,
-                newTabUrl: selectorState.newTabUrl
-            });
+// Build an element without ever touching innerHTML (titles come from web pages)
+function h(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+        if (key === 'className') {
+            node.className = value;
+        } else if (key === 'text') {
+            node.textContent = value;
+        } else if (key === 'disabled' || key === 'checked' || key === 'hidden') {
+            node[key] = value;
+        } else if (key.startsWith('on')) {
+            node.addEventListener(key.slice(2).toLowerCase(), value);
+        } else {
+            node.setAttribute(key, value);
         }
-        
-        await chrome.runtime.sendMessage({ action: 'clearSelectorState' });
-        window.close();
-        
-    } catch (error) {
-        console.error('Error handling tab selection:', error);
     }
+    for (const child of children) {
+        node.appendChild(child);
+    }
+    return node;
+}
+
+function byId(id) {
+    return document.getElementById(id);
+}
+
+function setupDecisionListeners() {
+    byId('startEnforcingButton').addEventListener('click', handleStartEnforcing);
+    byId('closeSelectedButton').addEventListener('click', handleCloseSelected);
+    byId('closePendingButton').addEventListener('click', handleClosePending);
+    byId('keepTheseButton').addEventListener('click', handleKeepThese);
+    byId('decideLaterButton').addEventListener('click', () => window.close());
+}
+
+// Keep a port open so the background can tell us when anything changed
+function connectToBackground() {
+    try {
+        port = chrome.runtime.connect({ name: 'popup' });
+        port.onMessage.addListener(handleBackgroundPush);
+    } catch (error) {
+        safeErrorLog('Error connecting to the background', error);
+    }
+}
+
+function handleBackgroundPush(message) {
+    if (message?.type !== 'state' || !decisionState) {
+        return;
+    }
+    const current = decisionState.operation ? decisionState.operation.revision : null;
+    const pushed = message.revisions?.[currentWindowId] ?? null;
+    if (message.startupMode !== decisionState.startupMode || pushed !== current) {
+        refreshDecisionState(); // clears the selection
+    }
+}
+
+async function refreshDecisionState() {
+    const response = await send({ action: 'getState', windowId: currentWindowId });
+    if (!response.success) {
+        showMessage(response.error || 'Error loading tab limits', 'error');
+        return false;
+    }
+    applyDecisionState(response);
+    return true;
+}
+
+function applyDecisionState(state) {
+    const previous = decisionState?.operation;
+    decisionState = state;
+    if (!state.operation || !previous || previous.opId !== state.operation.opId || previous.revision !== state.operation.revision) {
+        selectedTabIds.clear(); // the tabs changed under the selection
+    }
+
+    renderStartEnforcing(state);
+    const decisionView = byId('decisionView');
+    const settingsView = byId('settingsView');
+    if (state.operation) {
+        renderDecision(state.operation);
+        decisionView.hidden = false;
+        settingsView.hidden = true;
+    } else {
+        decisionView.hidden = true;
+        settingsView.hidden = false;
+    }
+}
+
+// "Start enforcing now" (D4): shown in both views while startup mode is on
+function renderStartEnforcing(state) {
+    byId('startEnforcingSection').hidden = !state.startupMode;
+    byId('startEnforcingNote').hidden = !(state.startupMode && state.startupOperations > 0);
+}
+
+function plural(count, word) {
+    return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
+
+function describeConstraint(constraint) {
+    const name = constraint.scope === 'window' ? 'Window' : constraint.title;
+    return `${name}: ${constraint.excess} over (limit ${constraint.limit})`;
+}
+
+function renderDecision(operation) {
+    byId('decisionTitle').textContent =
+        operation.kind === 'startup' ? 'Tabs left over from the last browser start' : 'Tab limit reached';
+
+    byId('constraintList').replaceChildren(
+        ...operation.constraints.map((constraint) => h('li', { text: describeConstraint(constraint) }))
+    );
+
+    const rejected = byId('rejectedNotice');
+    rejected.hidden = operation.rejectedCount === 0;
+    rejected.textContent = `${plural(operation.rejectedCount, 'new tab')} ${operation.rejectedCount === 1 ? 'was' : 'were'} closed. Decide here before opening more.`;
+
+    byId('decisionHint').textContent =
+        operation.kind === 'startup'
+            ? 'Nothing is closed automatically. Keep these tabs, or choose which to close.'
+            : 'Choose tabs to close, or close the new tabs. Nothing closes until you confirm.';
+
+    byId('tabChoiceList').replaceChildren(
+        ...operation.tabs.map((tab) => {
+            const checkbox = h('input', { type: 'checkbox', checked: selectedTabIds.has(tab.id) });
+            checkbox.addEventListener('change', () => handleTabToggled(tab.id, checkbox.checked));
+            const children = [checkbox, h('span', { className: 'tab-choice-title', text: tab.title || 'Untitled' })];
+            if (tab.status === 'pending' || tab.status === 'moved') {
+                children.push(h('span', { className: `tab-choice-tag ${tab.status}`, text: tab.status === 'pending' ? 'New' : 'Moved' }));
+            }
+            return h('li', {}, h('label', {}, ...children));
+        })
+    );
+
+    const closePending = byId('closePendingButton');
+    closePending.hidden = operation.pendingCount === 0 || !operation.canClosePending;
+    closePending.textContent = `Close the ${plural(operation.pendingCount, 'new tab')}`;
+    byId('closePendingNote').hidden = !(operation.pendingCount > 0 && !operation.canClosePending);
+    byId('keepTheseButton').hidden = !operation.canKeep;
+
+    updateSelectionSummary();
+}
+
+function handleTabToggled(tabId, checked) {
+    if (checked) {
+        selectedTabIds.add(tabId);
+    } else {
+        selectedTabIds.delete(tabId);
+    }
+    updateSelectionSummary();
+}
+
+function updateSelectionSummary() {
+    const operation = decisionState?.operation;
+    if (!operation) {
+        return;
+    }
+    const needs = remainingNeeds(operation.constraints, operation.tabs, selectedTabIds);
+    const stillNeeded = needs.filter((entry) => entry.need > 0);
+    byId('selectionSummary').textContent =
+        stillNeeded.length === 0
+            ? `${selectedTabIds.size} selected.`
+            : `${selectedTabIds.size} selected. ${stillNeeded.map((entry) => {
+                  const constraint = operation.constraints.find((c) => c.id === entry.id);
+                  return `${describeConstraint({ ...constraint, excess: entry.need }).replace(' over', ' more to close')}`;
+              }).join('; ')}.`;
+    byId('closeSelectedButton').disabled = !canCloseSelection(operation.constraints, operation.tabs, selectedTabIds);
+}
+
+// Run a decision command. On rejection nothing is discarded: show the reason
+// and refresh so the user can choose again (B-07).
+async function runDecision(request, successMessage) {
+    const operation = decisionState?.operation;
+    if (!operation) {
+        return;
+    }
+    const response = await send({ ...request, windowId: currentWindowId, opId: operation.opId, revision: operation.revision });
+    if (!response.success) {
+        showMessage(response.error || 'That did not work', 'error');
+        await refreshDecisionState();
+        return;
+    }
+    showMessage(successMessage, 'success');
+    await refreshDecisionState();
+    if (!decisionState?.operation) {
+        window.close(); // resolved
+    }
+}
+
+function handleCloseSelected() {
+    return runDecision({ action: 'closeSelected', tabIds: [...selectedTabIds] }, 'Tabs closed');
+}
+
+function handleClosePending() {
+    return runDecision({ action: 'closePending' }, 'New tabs closed');
+}
+
+function handleKeepThese() {
+    return runDecision({ action: 'keepThese' }, 'Tabs kept');
+}
+
+async function handleStartEnforcing() {
+    const response = await send({ action: 'startEnforcing' });
+    if (!response.success) {
+        showMessage(response.error || 'Could not start enforcing', 'error');
+        await refreshDecisionState();
+        return;
+    }
+    showMessage('Limits are now enforced for new tabs', 'success');
+    await refreshDecisionState();
 }

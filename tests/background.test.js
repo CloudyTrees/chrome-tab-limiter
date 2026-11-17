@@ -799,6 +799,70 @@ describe('startEnforcing (D4)', () => {
     });
 });
 
+// ------------------------------------------------- constraints (group 5)
+
+describe('window and group constraints together', () => {
+    it('requires a selection to resolve the window and every group', async () => {
+        await setup({
+            enforce: false,
+            limit: 10,
+            local: { tabLimit_1: 3, groupLimit_1_7: 1 },
+            tabs: [
+                { id: 1, windowId: 1, groupId: 7 },
+                { id: 2, windowId: 1, groupId: 7 },
+                { id: 3, windowId: 1 },
+                { id: 4, windowId: 1 },
+                { id: 5, windowId: 1 },
+                { id: 10, windowId: 2 }
+            ]
+        });
+        harness.groups.push({ id: 7, windowId: 1, title: 'Work', color: 'blue' });
+        const op = await getOp();
+        assert.deepEqual(op.constraints.map((c) => c.id).sort(), ['group:7', 'window']);
+        assert.equal(op.constraints.find((c) => c.id === 'group:7').title, 'Work');
+        // Closing an ungrouped tab reduces only the window; a group-7 tab reduces both
+        assert.deepEqual(op.tabs.find((t) => t.id === 3).reduces, ['window']);
+        assert.deepEqual(op.tabs.find((t) => t.id === 1).reduces.sort(), ['group:7', 'window']);
+
+        const windowOnly = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [3, 4] }) });
+        assert.equal(windowOnly.success, false, 'group 7 would still be over');
+        assert.equal(harness.tabIds(1).length, 5);
+
+        const both = await cmd({ action: 'closeSelected', ...decide(op, { tabIds: [1, 3] }) });
+        assert.deepEqual(both, { success: true });
+        assert.equal(harness.tabIds(1).length, 3);
+    });
+
+    it('resolves the operation when a group vanishes and its tabs become ungrouped', async () => {
+        await setup({ limit: 10, local: { groupLimit_1_7: 2 } });
+        harness.setGroup(1, 7);
+        harness.setGroup(2, 7);
+        await flush();
+        const extra = await open(1, { groupId: 7 }); // group 7 would hold 3, limit 2
+        assert.equal((await getOp()).tabs.find((t) => t.id === extra).status, 'pending');
+
+        for (const id of [1, 2, extra]) harness.setGroup(id, -1); // the group is deleted
+        await flush();
+
+        assert.equal(await getOp(), null);
+        assert.equal(harness.tabIds(1).length, 4, 'nothing was closed');
+    });
+
+    it('tells the popup how many windows still hold a startup operation', async () => {
+        await setup({
+            enforce: false,
+            tabs: [
+                ...Array.from({ length: 5 }, (_, i) => ({ id: i + 1, windowId: 1 })),
+                ...Array.from({ length: 5 }, (_, i) => ({ id: i + 20, windowId: 2 }))
+            ]
+        });
+        assert.equal((await getState()).startupOperations, 2);
+
+        await startEnforcing();
+        assert.equal((await getState()).startupOperations, 2, 'ending startup mode leaves the operations open');
+    });
+});
+
 // ---------------------------------------------------------- message security
 
 describe('message security', () => {

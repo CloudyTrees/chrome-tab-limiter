@@ -13,6 +13,35 @@
         </header>
 
         <main class="popup-content">
+            <section class="start-enforcing" id="startEnforcingSection" hidden>
+                <p class="start-enforcing-text">
+                    Startup mode: nothing is closed automatically until you decide.
+                </p>
+                <button id="startEnforcingButton" class="action-btn">Start enforcing now</button>
+                <p class="start-enforcing-note" id="startEnforcingNote" hidden>
+                    A window that is still over its limit stays open for review. Its next new tabs wait as pending, up to your pending limit, and are then closed until you decide.
+                </p>
+            </section>
+
+            <section class="decision" id="decisionView" hidden>
+                <h2 id="decisionTitle"></h2>
+                <ul class="constraint-list" id="constraintList"></ul>
+                <p class="rejected-notice" id="rejectedNotice" hidden></p>
+                <p class="decision-hint" id="decisionHint"></p>
+                <ul class="tab-choice-list" id="tabChoiceList"></ul>
+                <p class="selection-summary" id="selectionSummary"></p>
+                <p class="close-pending-note" id="closePendingNote" hidden>
+                    Closing these would close the window; choose tabs instead.
+                </p>
+                <div class="decision-actions">
+                    <button id="closeSelectedButton" class="confirm-btn" disabled>Close selected tabs</button>
+                    <button id="closePendingButton" class="action-btn" hidden></button>
+                    <button id="keepTheseButton" class="action-btn" hidden>Keep these</button>
+                    <button id="decideLaterButton" class="cancel-btn">Decide later</button>
+                </div>
+            </section>
+
+            <div id="settingsView">
             <div class="status-section">
                 <div class="status-item">
                     <span class="status-label">Current tabs:</span>
@@ -21,15 +50,6 @@
                 <div class="status-item">
                     <span class="status-label">Current limit:</span>
                     <span class="status-value" id="currentLimit">-</span>
-                </div>
-            </div>
-
-            <div class="grandfathered-notice" id="grandfatheredNotice" style="display: none;">
-                <div class="notice-content">
-                    <div class="notice-icon">ℹ️</div>
-                    <div class="notice-text">
-                        <strong>Existing tabs protected:</strong> You have more tabs than your current limit. Existing tabs won't be closed, but new tabs will be limited.
-                    </div>
                 </div>
             </div>
 
@@ -78,6 +98,7 @@
                     <span class="btn-icon">⚙️</span>
                     Advanced Settings
                 </button>
+            </div>
             </div>
         </main>
 

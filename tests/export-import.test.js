@@ -132,6 +132,29 @@ describe('exportSettings alias allocation (B-08)', () => {
     });
 });
 
+describe('pending-tab cap in export and import', () => {
+    it('exports the cap, defaulting to 5', async () => {
+        assert.equal((await api.exportSettings()).settings.maxPendingPerWindow, 5);
+        await harness.chrome.storage.local.set({ maxPendingPerWindow: 8 });
+        assert.equal((await api.exportSettings()).settings.maxPendingPerWindow, 8);
+    });
+
+    it('imports a valid cap', async () => {
+        await api.importSettings(validFile({ maxPendingPerWindow: 7 }));
+        assert.equal(harness.chrome.storage.local._dump().maxPendingPerWindow, 7);
+    });
+
+    it('rejects a cap outside 1-10 or not an integer', () => {
+        for (const value of [0, 11, -1, 2.5, '5', null]) {
+            assert.equal(api.validateImportData(validFile({ maxPendingPerWindow: value })).valid, false, String(value));
+        }
+    });
+
+    it('still accepts older files without the cap', () => {
+        assert.equal(api.validateImportData(validFile()).valid, true);
+    });
+});
+
 describe('importSettings', () => {
     it('replace mode (the default) clears existing settings first', async () => {
         await harness.chrome.storage.local.set({ defaultTabLimit: 3, tabLimit_1: 5 });

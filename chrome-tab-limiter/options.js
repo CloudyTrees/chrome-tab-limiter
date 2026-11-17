@@ -1,4 +1,7 @@
 // Options page script for Tab Limiter extension
+import { parseLimitInput } from './utils/validation.js';
+
+const DEFAULT_MAX_PENDING = 5;
 
 // Debug logging configuration
 const OPTIONS_DEBUG_MODE = false;
@@ -25,6 +28,7 @@ let confirmResetButton, cancelResetButton;
 let importFile, backToPopupButton;
 let exportStatus, importStatus, resetStatus;
 let settingsPreview, importPreview, importPreviewSection;
+let maxPendingInput, saveMaxPendingButton, maxPendingStatus;
 
 // State management
 let pendingImportData = null;
@@ -41,6 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     
     // Load initial data
+    await loadMaxPending();
     await loadCurrentSettings();
     
     debugLog('Options page initialized');
@@ -72,10 +77,21 @@ function initializeElements() {
     settingsPreview = document.getElementById('settingsPreview');
     importPreview = document.getElementById('importPreview');
     importPreviewSection = document.getElementById('importPreviewSection');
+
+    // Pending-tab cap
+    maxPendingInput = document.getElementById('maxPendingInput');
+    saveMaxPendingButton = document.getElementById('saveMaxPendingButton');
+    maxPendingStatus = document.getElementById('maxPendingStatus');
 }
 
 // Set up event listeners
 function setupEventListeners() {
+    // Pending-tab cap
+    saveMaxPendingButton.addEventListener('click', handleSaveMaxPending);
+    maxPendingInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') handleSaveMaxPending();
+    });
+
     // Export functionality
     exportButton.addEventListener('click', handleExport);
     
@@ -99,6 +115,35 @@ function setupEventListeners() {
     
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyboardShortcuts);
+}
+
+// Load the pending-tab cap (1-10, default 5)
+async function loadMaxPending() {
+    try {
+        const { maxPendingPerWindow } = await chrome.storage.local.get('maxPendingPerWindow');
+        maxPendingInput.value = parseLimitInput(maxPendingPerWindow, 1, 10) ?? DEFAULT_MAX_PENDING;
+    } catch (error) {
+        safeErrorLog('Error loading pending-tab setting', error);
+        maxPendingInput.value = DEFAULT_MAX_PENDING;
+    }
+}
+
+// Save the pending-tab cap. Lowering it never closes tabs that are already pending.
+async function handleSaveMaxPending() {
+    const value = parseLimitInput(maxPendingInput.value, 1, 10);
+    if (value === null) {
+        showStatusMessage(maxPendingStatus, 'Enter a whole number from 1 to 10', 'error');
+        return;
+    }
+
+    try {
+        await chrome.storage.local.set({ maxPendingPerWindow: value });
+        showStatusMessage(maxPendingStatus, 'Saved', 'success');
+    } catch (error) {
+        safeErrorLog('Error saving pending-tab setting', error);
+        showStatusMessage(maxPendingStatus, 'Could not save the setting', 'error');
+    }
+    setTimeout(() => clearStatusMessage(maxPendingStatus), 3000);
 }
 
 // Load and display current settings

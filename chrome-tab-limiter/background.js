@@ -727,7 +727,14 @@ async function cmdGetState(request) {
     const local = await loadSettings();
     const state = await loadOrInitialize(local);
     const win = state.windows[request.windowId];
-    const response = { success: true, startupMode: state.startupMode, maxPending: pendingCapFor(local), operation: null };
+    const response = {
+        success: true,
+        startupMode: state.startupMode,
+        maxPending: pendingCapFor(local),
+        // Windows still holding a startup operation: "Start enforcing now" leaves them open (D4)
+        startupOperations: Object.values(state.windows).filter((w) => w.op?.kind === 'startup').length,
+        operation: null
+    };
 
     if (!win?.op) {
         return response;

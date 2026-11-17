@@ -32,6 +32,7 @@ async function exportSettings() {
             exportDate: 'Privacy Protected', // Remove date/time entirely for privacy
             settings: {
                 defaultTabLimit: allData.defaultTabLimit || 10,
+                maxPendingPerWindow: validateMaxPending(allData.maxPendingPerWindow) ? allData.maxPendingPerWindow : 5,
                 windowLimits: {},
                 groupLimits: {}
             },
@@ -119,6 +120,11 @@ async function importSettings(importData, options = {}) {
             storageData.defaultTabLimit = importData.settings.defaultTabLimit;
         }
         
+        // Pending-tab cap
+        if (importData.settings.maxPendingPerWindow !== undefined) {
+            storageData.maxPendingPerWindow = importData.settings.maxPendingPerWindow;
+        }
+
         // When merging (or not replacing), existing keys are kept because
         // chrome.storage.local.set() only writes the keys it is given;
         // imported values overwrite matching existing keys.
@@ -198,6 +204,13 @@ function validateImportData(data) {
             }
         }
         
+        // Validate the pending-tab cap if present
+        if (data.settings.maxPendingPerWindow !== undefined) {
+            if (!validateMaxPending(data.settings.maxPendingPerWindow)) {
+                return { valid: false, error: 'Invalid pending tab limit' };
+            }
+        }
+
         // Validate window limits if present
         if (data.settings.windowLimits) {
             if (typeof data.settings.windowLimits !== 'object') {
@@ -234,6 +247,11 @@ function validateImportData(data) {
 // Validate a tab limit value
 function validateLimit(limit) {
     return Number.isSafeInteger(limit) && limit >= 1 && limit <= 100;
+}
+
+// Validate the pending-tab cap (1-10)
+function validateMaxPending(value) {
+    return Number.isSafeInteger(value) && value >= 1 && value <= 10;
 }
 
 // Validate window ID format to prevent injection
