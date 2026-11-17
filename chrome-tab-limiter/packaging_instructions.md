@@ -32,6 +32,13 @@ stops with an error if a script or page refers to a file that is not listed.
 
 ---
 
+## Publishing to the Chrome Web Store
+
+Uploading is done by hand in the Developer Dashboard. `tools/release.sh` checks the
+tree, runs the tests and builds the ZIP to upload; see `tools/RELEASING.md`.
+
+---
+
 ## Method 2: CRX package
 
 A `.crx` is Chrome's single-file extension format. Pack the **extracted ZIP
