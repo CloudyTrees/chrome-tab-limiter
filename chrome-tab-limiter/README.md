@@ -6,8 +6,8 @@ A Chrome extension that helps you manage tab overload by setting maximum tab lim
 
 ### Core Functionality
 - **Per-Window Tab Limits**: Set different maximum tab limits for each browser window
-- **Smart Tab Selection**: When you exceed the limit, a popup window lets you choose which existing tab to close
-- **Persistent Settings**: All limits are saved and synced across your devices (if Chrome sync is enabled)
+- **You decide what closes**: A new tab that exceeds a limit stays open and waits. The popup then lets you choose which tabs to close. The extension never closes a tab you haven't been asked about, except new tabs beyond the pending limit (see below).
+- **Persistent Settings**: Limits are saved locally in this browser (they are not synced to other devices)
 
 ### Advanced Features
 - **Tab Group Support**: Set separate limits for different tab groups within a window
@@ -43,12 +43,32 @@ A Chrome extension that helps you manage tab overload by setting maximum tab lim
 3. Set individual limits for each group
 4. Ungrouped tabs can have their own separate limit
 
-### When Limit is Exceeded
-When you try to open a tab beyond your limit:
-1. A selection window appears showing all tabs in the current window
-2. Choose which existing tab to close
-3. Click "Close Selected Tab" to proceed
-4. Or click "Cancel" to close the new tab instead
+### When a Limit is Exceeded
+The new tab stays open as a **pending** tab, the toolbar badge shows how many tabs are over, and the popup opens (if Chrome allows it; otherwise click the icon).
+1. The popup lists the limits that are exceeded (the window, or a group) and every tab in the window.
+2. Tick the tabs to close and click "Close selected tabs". The button turns on only when closing them would bring every limit back within range, and never lets you close the last tab in a window.
+3. Or click "Close the new tabs" to close just the pending ones.
+4. Or click "Decide later". Nothing changes and nothing times out.
+
+While a window is waiting for your decision, further new tabs in it also wait, up to the **pending limit** (default 5, set on the options page, 1 to 10). After that, additional new tabs are closed and the popup tells you how many. Lowering the pending limit never closes tabs that are already waiting.
+
+A tab you drag into a window or group that is full counts toward the excess and asks you the same question, but it is never closed automatically.
+
+### After a Browser Start (startup mode)
+When the browser starts or the extension is reloaded or updated, restored windows may already be over their limits. Until you make your first decision, **nothing is closed automatically**. Tabs over a limit are kept, and the badge shows the excess. In the popup you can:
+- **Keep these**: grandfather the tabs that are there now as that window's allowance.
+- **Choose tabs to close**, as above.
+- **Start enforcing now**: end startup mode right away, in every window, without closing or grandfathering anything. This button is shown in the popup (also when no window is over) for as long as startup mode is on.
+
+Your first decision of any kind also ends startup mode.
+
+### Things to know
+- Until your first decision after a browser start, limits are not enforced by closing tabs. If no window goes over, startup mode can stay on until you click "Start enforcing now" or make a decision.
+- After "Start enforcing now", a window that was already over its limit stays open for review: its next new tabs wait as pending (up to the pending limit) and are then closed, until you resolve that window.
+- Tabs you open during startup mode look the same as restored tabs, so "Keep these" can grandfather them. Tabs opened after startup mode ends can never be grandfathered.
+- A tab that was rejected may already have started loading. Its address is not remembered or reopened.
+- Closing pending tabs discards whatever state they had acquired (a half-filled form, for example). That only happens when you press the labeled button.
+- If the extension's background worker restarts at the wrong moment, a new tab may not be recognised as pending. It then shows up as unexplained excess in the popup for you to review, and nothing is closed.
 
 ### Export/Import Settings
 1. Click the extension icon
@@ -61,13 +81,16 @@ When you try to open a tab beyond your limit:
 chrome-tab-limiter/
 ├── manifest.json          # Extension configuration
 ├── background.js          # Core tab management logic
-├── popup.html/js/css      # Settings popup interface
-├── selector.html/js/css   # Tab selection window
-├── options.html/js/css    # Export/import settings page
+├── popup.html/js/css      # Settings and decision popup
+├── options.html/js/css    # Pending limit, export/import settings page
 ├── utils/
+│   ├── limits.js          # Pure limit arithmetic (excess, allowances, creation rules)
+│   ├── state-store.js     # Enforcement state in chrome.storage.session
+│   ├── serial-queue.js    # One queue: every event and command runs in order
+│   ├── selection.js       # Live feedback for the popup's tab picker
 │   ├── storage.js         # Chrome storage utilities
-│   ├── validation.js      # Message/URL validation for the background worker
-│   ├── sanitize.js        # HTML escaping and title/favicon sanitizing
+│   ├── validation.js      # Message validation for the background worker
+│   ├── sanitize.js        # HTML escaping and title sanitizing
 │   └── export-import.js   # Settings backup utilities
 └── icons/                 # Extension icons (16, 48, 128px)
 ```
@@ -90,11 +113,11 @@ Settings are stored in `chrome.storage.local` as flat keys:
   "tabLimit_<windowId>": 5,
   "groupLimit_<windowId>_<groupId>": 4,
   "groupLimit_<windowId>_ungrouped": 6,
+  "maxPendingPerWindow": 5,
   "hasSeenWelcome": true
 }
 ```
-While the tab selector is open, the pending "tab to reopen" is kept in
-`chrome.storage.session` (in memory only, cleared when the browser exits).
+The decisions in progress are kept in `chrome.storage.session` under `tl_state`: window IDs and tab IDs, which tabs are pending, moved or left over from startup, each window's allowance, a random operation ID, a revision number, and the count of rejected tabs. It holds **no URLs and no titles**. Session storage is in memory only: it survives a background-worker restart, and is cleared when the browser exits or the extension is reloaded or updated (which is when startup mode begins again).
 
 ## Development
 
@@ -111,8 +134,10 @@ npm test          # or: node --test tests/
 Tests use Node's built-in test runner and an in-memory `chrome.*` stand-in
 (`tests/helpers/chrome-mock.js`). `background.test.js` loads the real
 `background.js` and drives it through its tab events and runtime messages.
-DOM behavior (popup/selector rendering, keyboard handling) is not covered and
-still needs a manual check.
+The popup is exercised against a small fake DOM, so rendering and click handling
+are covered, but real Chrome behavior (event ordering, the popup opening on its
+own, dragging tabs between windows, worker suspension) needs the manual
+checklist in `REVIEW.md`.
 
 ### Manual Testing
 1. Make changes to the code
@@ -137,8 +162,10 @@ still needs a manual check.
 - Make sure you're counting all tabs (including pinned)
 - Check if tab groups have separate limits
 
+### The Popup Doesn't Open By Itself
+- Chrome only allows an extension to open its popup in some situations. The toolbar badge still shows how many tabs are over; click the icon to decide.
+
 ### Settings Not Saving
-- Check Chrome sync is enabled (if using sync storage)
 - Look for storage quota errors in console
 - Try export/import as a workaround
 
@@ -158,8 +185,9 @@ Requires Chrome 127 or later.
 This extension:
 - Works entirely locally on your machine
 - Does not collect or transmit any data — the content security policy sets `connect-src 'none'`, so extension pages cannot make network requests, and there is no analytics or telemetry
-- Only accesses tab information (titles, favicons, counts) to enforce limits and show the tab selector; tab URLs and titles are never written to storage
-- Stores only your tab-limit settings, in `chrome.storage.local` (not synced to your Google account)
+- Reads tab information (titles, URLs, groups, counts) only to enforce limits and to show the tab list in the popup; tab URLs and titles are never written to storage
+- Stores your tab-limit settings in `chrome.storage.local` (not synced to your Google account), and the decisions in progress as IDs and counts in memory-only `chrome.storage.session` (see Storage Structure)
+- Does not remember or reopen the address of a tab it closed
 - Requests no host, history, cookie, or web-request permissions and injects no content scripts
 - Exports settings only when you ask, as a local JSON file with window/group IDs anonymized
 
