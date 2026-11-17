@@ -2255,3 +2255,68 @@ describe the removed selector. They are not shipped. `icons/converter.html` and 
   see every tab's title and URL, and it uses only titles, groups and counts.
 - No change was made to the extension or to the other documents for this round.
   The suggested changes above are proposals awaiting the owner's decision.
+
+---
+
+## Privacy and security review, second round — Codex addendum (2026-11-17)
+
+Read Claude's review in `da0303e` and compared it with the independent Codex
+review of the same runtime at `777b808`. The intervening commit changes only this
+document. **No confirmed security vulnerability or external data-collection path
+was found.** The additional observations below are informational, with no
+demonstrated disclosure or attacker privilege gain.
+
+The unused favicon field and timestamped filename were also noted by Codex and
+are already covered by S-3 and S-5. They are not repeated as separate findings.
+Claude's live `windows` permission check is its own evidence; Codex did not
+independently repeat it.
+
+### Additional observations
+
+| # | Severity | Finding | Suggested change |
+| --- | --- | --- | --- |
+| S-8 | Informational (packaging) | Removing the stray swap file resolves S-1's immediate artifact, but the documented ZIP and complete-package recipes still recursively include the working extension folder. Only the dedicated backup recipe excludes PEM files, and it does not exclude editor recovery files. An unrelated local artifact could therefore be included in a later shared archive. No signing key, shared archive or actual sensitive-file disclosure was established. | Package a clean staging directory with an explicit list of required runtime files and icons. Exclude editor recovery files, keys, backups and exports from every distribution path, and inspect the archive before sharing. |
+| S-9 | Informational (export disclosure) | Beyond the filename issue in S-5, the JSON retains aliased window/group relationships, counts of configured rules and the extension version. `options.html` says "Only limit values are preserved", which understates those contents. Raw IDs, browsing URLs and titles are absent from normal exports, and the file is downloaded only at the user's request. | Describe the retained metadata accurately. If those details are unnecessary for the intended backup, omit them. Aliases remove raw identifiers but do not remove relationships. |
+
+**Source evidence:** S-8: `chrome-tab-limiter/packaging_instructions.md:13`
+(recursive ZIP), `187` (PEM-only backup exclusions), `202–208` (recursive copy
+and archive). S-9: `chrome-tab-limiter/utils/export-import.js:30–43,49–90`
+(export schema, aliases and counts), and `chrome-tab-limiter/options.html:121`
+("Only limit values" wording). These are distinct from the already recorded
+swap-file removal and filename observation.
+
+### Qualifications to the combined verdict
+
+- **Local processing and retention exist.** The extension reads live tab
+  metadata for its features, stores preferences in `chrome.storage.local`, and
+  retains tab/window IDs, counts and operation bookkeeping in
+  `chrome.storage.session`. The supported privacy conclusion is that no
+  developer/server collection or transmission path, or URL/title persistence
+  path, was found. The opening phrase "nothing ... stores ... browsing data"
+  should not be read as zero local information processing or retention.
+  Evidence: `chrome-tab-limiter/utils/state-store.js:7–21` and
+  `chrome-tab-limiter/background.js:180–190,925–995`.
+- **No exploit was established by source review.** Sender checks, request
+  validation, safe rendering and the manifest's restricted surfaces support
+  that result. Static review does not prove the categorical claim that nothing
+  is exploitable. Likewise, `connect-src 'none'` restricts connection APIs;
+  the no-outbound-path conclusion also depends on inspecting actual consumers,
+  rather than that directive alone.
+
+### Independent review coverage and limits
+
+Codex used an independent baseline audit, architecture review and focused privacy
+dataflow review, then reconciled their results against source. All 62 tracked
+files were covered, including runtime code, tests, developer tools, historical
+specifications/reviews and static assets. No usable embedded credentials were
+found. Historical selector/sync examples are inactive, and synthetic URL/token
+examples are not evidence of credentials.
+
+This was offline static inspection. Codex did not run Chrome, tests, a network
+capture or a packaging workflow for this privacy/security pass. The editor swap
+file was inspected by metadata only; its recovery contents were not reviewed.
+It disappeared during the audit without Codex removing it, consistent with S-1
+being resolved by the owner.
+
+This addendum changes only `REVIEW.md`. No runtime fixes or other proposed
+changes have been applied.
