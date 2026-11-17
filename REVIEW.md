@@ -2399,3 +2399,114 @@ qualifications to my verdict.
   `tools/` still describe the removed selector. They are not shipped.
 
 Not pushed. Committed as one commit.
+
+---
+
+## Codex verification of S-2–S-9 fixes (2026-11-17)
+
+Reviewed commit `0d48781bddd0ea643fe76a15c1d6d20b7855cff8` against
+`a6560d2` on `sh-dev`. Source locations below refer to the reviewed commit.
+
+**Verdict: the runtime hardening addresses the reviewed S-2–S-9 cases, but two
+issues in the rewritten installer examples need correction.** These examples
+are in the packaging documentation and must be copied and run by a user; they
+are not extension runtime entry points. No new runtime data-collection or
+exfiltration path was found in the reviewed changes.
+
+### Verification performed
+
+- Captured the tracked repository files in an isolated temporary copy and ran
+  `node --test tests/`: **237 passed, 0 failed, 60 suites**.
+- Substituted the previous versions of `background.js`, `manifest.json`,
+  `popup.js` and `utils/export-import.js` in that copy, retaining the current
+  tests: **229 passed and 8 failed**, confirming the reported test sensitivity.
+  Restored the reviewed sources in the copy afterward.
+- Ran `tools/package.sh` in the temporary copy with inert swap, PEM and settings
+  export decoys in its extension folder. The ZIP contained **20 runtime files
+  and two directory entries**, excluded all decoys, and passed ZIP CRC checking.
+- Reproduced the shell installer failure below using the exact documented
+  snippet in a disposable directory. Browser-launch commands were replaced by
+  inert stubs; no real browser or user installation was touched.
+- Inspected the Windows command expansion without executing it. PowerShell was
+  unavailable, so no Windows runtime reproduction is claimed.
+- Confirmed that HEAD and every tracked source file's hash were unchanged after
+  investigation. This subsequent write-up changes only `REVIEW.md`.
+
+### S-10 — P2: ZIP filename is interpreted as PowerShell code
+
+**Location:** `chrome-tab-limiter/packaging_instructions.md:95–103`.
+
+The Windows example substitutes `%ZIPFILE%` directly into PowerShell source
+inside a single-quoted string. A filename containing an apostrophe can end that
+string and introduce a command. For example, a ZIP named:
+
+```text
+tab-limiter-';Write-Output MARKER;#.zip
+```
+
+produces this command after filename substitution:
+
+```text
+powershell -command "Expand-Archive -Path 'tab-limiter-';Write-Output MARKER;#.zip' -DestinationPath 'tab-limiter-extension'"
+```
+
+The filename has become executable source: the string ends before the semicolon,
+and the remainder after `#` is a comment. The marker command is an inert example
+of the injection; it was not executed in this review.
+
+**Prerequisites and impact:** A party must supply a matching ZIP filename, and
+the user must run the installer snippet with that file present. This does not
+give an ordinary website an extension messaging route. It crosses the separate
+archive-filename-to-installer-code boundary and can run commands with the
+installer user's operating-system privileges before the extension is loaded.
+
+**Fix direction:** Pass the filename as data to a static PowerShell command,
+for example through a safely assigned environment variable read with
+`Expand-Archive -LiteralPath $env:ZIPFILE`. Quote the batch assignment as well;
+do not interpolate the filename into executable command text. Verify filenames
+containing apostrophes, spaces and shell metacharacters are handled literally.
+
+**Validation:** Source-confirmed unsafe command construction and expanded
+example; Windows execution was not performed.
+
+### S-11 — P2: failed extraction deletes the previous installation and reports success
+
+**Locations:** `chrome-tab-limiter/packaging_instructions.md:71–75,102–106`.
+
+Both installer examples delete `tab-limiter-extension` before extraction has
+succeeded. Neither checks extraction success before printing its success
+message and continuing to the browser instructions.
+
+**Executed reproduction:** In a disposable directory, create an existing
+`tab-limiter-extension` directory with an inert sentinel representing the old
+installation. Add a matching ZIP filename containing invalid ZIP bytes. Run the
+documented shell snippet with browser-launch stubs.
+
+**Observed:** The old installation sentinel was deleted, `unzip` reported an
+invalid archive, the script printed "Extension extracted", and it exited with
+status 0. The previous working directory was replaced by an empty directory.
+The Windows example has the same destructive ordering and unchecked extraction
+by source inspection; it was not executed on Windows.
+
+**Impact:** A corrupt, incomplete or otherwise unextractable archive can remove
+a working unpacked installation or other contents at the destination, while
+the installer reports success. This is a distribution/installation correctness
+failure, not evidence that the extension runtime deletes arbitrary files.
+
+**Fix direction:** Extract into a fresh temporary directory, verify extraction
+and the required extension files, then replace the destination while retaining
+the old installation until the replacement succeeds. On failure, preserve the
+existing directory, report an error, return a nonzero status and skip browser
+launch. Adding fail-fast behavior alone does not fix deleting the destination
+before extraction.
+
+### Acceptance and limits
+
+Correct both documented installer recipes and add focused checks for hostile
+filenames and failed extraction before sign-off on the distribution changes.
+The passing runtime tests and successful allowlisted package build remain valid;
+they do not exercise these installation snippets.
+
+This review did not independently repeat Claude's live Chrome permission or CSP
+checks, test Chrome 127, or run Windows. Only this review document is committed
+by Codex; no runtime or installer fixes, test changes, push or merge are included.
