@@ -60,7 +60,15 @@ const replacedBy = new Map();
 // per tab. A close command compares against the count when its message arrived.
 // Only numbers are kept, never a URL.
 let navSeq = 0;
-const navigatedAt = new Map();
+const navigatedAt = new Map(); // tab ID -> latest navigation number
+const windowNavAt = new Map(); // window ID -> latest navigation number of any tab in it (R3)
+
+// Moves and settings changes are noted the same way, so a task that is waiting on
+// the browser can tell that one happened while it waited, even if the tab ended
+// up where it started (REG-01a) or a limit was raised mid-decision (REG-04a).
+let moveSeq = 0;
+const movedAt = new Map(); // tab ID -> latest move number
+let settingsSeq = 0;
 
 // Highest tab ID whose creation we have heard about. Chrome assigns tab IDs in
 // increasing order and delivers onCreated in that order, so a tab with a higher
@@ -407,31 +415,58 @@ function runEvent(name, task) {
     queue.enqueue(task).catch((error) => safeErrorLog(`Error handling ${name}`, error));
 }
 
-async function handleCreated(originalId) {
+const movedSince = (ids, since) => ids.some((id) => (movedAt.get(id) ?? 0) > since);
+const MAX_ATTEMPTS = 3;
+
+// `createdAfterMove` is the move counter when the tab was announced: any move of
+// this tab after that point makes it a moved tab, never a rejectable new one.
+async function handleCreated(originalId, createdAfterMove) {
     let tabId = originalId;
     try {
-        let tab = await currentTab(tabId);
-        if (!tab) {
-            return; // gone before we looked at it
-        }
-        tabId = tab.id;
+        let tab;
+        let local;
+        let state;
+        let win;
+        let all;
+        let counted;
+        let settingsAt;
 
-        const local = await loadSettings();
-        const state = await loadOrInitialize(local);
+        // Read everything the decision rests on. If the settings change while we
+        // wait, start over with the new ones (REG-04a).
+        for (let attempt = 1; ; attempt++) {
+            settingsAt = settingsSeq;
+            tab = await currentTab(tabId);
+            if (!tab) {
+                return; // gone before we looked at it
+            }
+            tabId = tab.id;
+
+            local = await loadSettings();
+            state = await loadOrInitialize(local);
+            await settleWindow(state, local, tab.windowId); // judge against current limits (REG-04)
+            win = windowOf(state, tab.windowId);
+            ({ all, counted } = await readWindow(tab.windowId));
+
+            // Look again right before deciding: the tab may have moved to another
+            // window (its move is handled on its own, REG-01), been regrouped, or
+            // been replaced (REG-03)
+            const fresh = await currentTab(tabId);
+            if (!fresh || fresh.windowId !== tab.windowId) {
+                return;
+            }
+            tab = fresh;
+            tabId = fresh.id;
+
+            if (settingsSeq === settingsAt || attempt >= MAX_ATTEMPTS) {
+                break;
+            }
+        }
+
         const windowId = tab.windowId;
-        await settleWindow(state, local, windowId); // judge against current limits (REG-04)
-        const win = windowOf(state, windowId);
-        const { all, counted } = await readWindow(windowId);
-
-        // Look again right before deciding: the tab may have moved to another
-        // window (its move is handled on its own, REG-01), been regrouped, or
-        // been replaced (REG-03)
-        const fresh = await currentTab(tabId);
-        if (!fresh || fresh.windowId !== windowId) {
-            return;
+        const chain = [originalId, tabId];
+        if (movedSince(chain, createdAfterMove)) {
+            return; // it was moved, even if it came back: the move handler protects it (REG-01a)
         }
-        tab = fresh;
-        tabId = fresh.id;
 
         const decision = decideCreation({
             tabs: counted,
@@ -464,16 +499,28 @@ async function handleCreated(originalId) {
         await persist(state);
 
         if (action === 'reject') {
-            // Last look: only reject a tab that is still where it was decided
+            // Last look: only reject a tab that is still where it was decided, was
+            // not moved, and was decided on the settings that are still current
             const last = await currentTab(tabId);
-            if (last && last.windowId === windowId && (last.groupId ?? -1) === (tab.groupId ?? -1)) {
+            const inPlace =
+                last &&
+                last.windowId === windowId &&
+                (last.groupId ?? -1) === (tab.groupId ?? -1) &&
+                !movedSince(chain, createdAfterMove);
+            if (inPlace && settingsSeq === settingsAt) {
                 try {
                     await chrome.tabs.remove(last.id);
                 } catch (error) {
                     safeErrorLog('Error rejecting tab', error);
                 }
             } else {
-                win.op.rejectedCount -= 1; // not rejected after all; its move or change is handled separately
+                win.op.rejectedCount -= 1; // not rejected after all
+                if (inPlace) {
+                    // The limits changed under the decision: keep the tab as a new
+                    // one; the queued settings change settles the window (REG-04a)
+                    win.pending.push(last.id);
+                }
+                // otherwise its move or change is handled by its own event
             }
         }
         if (action !== 'admit') {
@@ -620,12 +667,26 @@ async function handleReplaced(addedTabId, removedTabId) {
 }
 
 // Settings changed (limits or the pending cap): reconcile every window now, so
-// the badge and an open popup are current and no stale operation is left (REG-04)
-async function handleSettingsChanged() {
+// the badge and an open popup are current and no stale operation is left (REG-04).
+// An operation that stays open may now show different constraints, so its
+// revision advances and the popup refreshes and drops its selection (REG-04b).
+async function handleSettingsChanged(changedKeys) {
+    const everyWindow = changedKeys.some((key) => key === 'defaultTabLimit' || key === 'maxPendingPerWindow');
+    const affected = new Set();
+    for (const key of changedKeys) {
+        const match = /^(?:tabLimit_|groupLimit_)(\d+)/.exec(key);
+        if (match) {
+            affected.add(Number(match[1]));
+        }
+    }
+
     const local = await loadSettings();
     const state = await loadOrInitialize(local);
     for (const { id: windowId } of await chrome.windows.getAll()) {
-        await settleWindow(state, local, windowId);
+        const result = await settleWindow(state, local, windowId);
+        if (result?.win.op && (everyWindow || affected.has(windowId))) {
+            touch(result.win);
+        }
     }
     await persist(state);
     await publish(state);
@@ -672,11 +733,15 @@ function checkOperation(state, request) {
 // tabs were closed and whether any was skipped for that reason.
 const navigatedSince = (tabId, since) => (navigatedAt.get(tabId) ?? 0) > since;
 
+// R3: a URL change on ANY tab in the window invalidates a selection made on the
+// view the user saw, because every tab in it is selectable
+const windowNavigatedSince = (windowId, since) => (windowNavAt.get(windowId) ?? 0) > since;
+
 async function closeTabsGuarded(windowId, expected, since) {
     let closed = 0;
     let stale = false;
     for (const { id, groupId } of expected) {
-        if (navigatedSince(id, since)) {
+        if (navigatedSince(id, since) || windowNavigatedSince(windowId, since)) {
             stale = true;
             continue;
         }
@@ -693,7 +758,7 @@ async function closeTabsGuarded(windowId, expected, since) {
         if (remaining.length <= 1) {
             break;
         }
-        if (navigatedSince(id, since)) {
+        if (navigatedSince(id, since) || windowNavigatedSince(windowId, since)) {
             stale = true;
             continue;
         }
@@ -709,8 +774,8 @@ async function closeTabsGuarded(windowId, expected, since) {
 
 // Record the decision, close the tabs, then reconcile from the real tabs
 async function carryOutClosing(state, local, windowId, expected, since) {
-    if (expected.some((tab) => navigatedSince(tab.id, since))) {
-        return fail(STALE_MESSAGE); // a chosen tab navigated while the command waited
+    if (windowNavigatedSince(windowId, since) || expected.some((tab) => navigatedSince(tab.id, since))) {
+        return fail(STALE_MESSAGE); // a tab in this window navigated while the command waited
     }
     const win = state.windows[windowId];
     win.op.phase = 'closing';
@@ -911,27 +976,36 @@ const COMMANDS = {
 chrome.tabs.onCreated.addListener((tab) => {
     announcedUpTo = Math.max(announcedUpTo, tab.id);
     undecided.add(tab.id); // synchronously, before the task is queued
-    runEvent('tab creation', () => handleCreated(tab.id));
+    const movesBefore = moveSeq;
+    runEvent('tab creation', () => handleCreated(tab.id, movesBefore));
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
     undecided.delete(tabId);
     navigatedAt.delete(tabId);
+    movedAt.delete(tabId);
     runEvent('tab removal', () => handleRemoved(tabId, removeInfo.windowId));
 });
 
 chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
+    moveSeq += 1; // noted now, before the queued task runs (REG-01a)
+    movedAt.set(tabId, moveSeq);
     runEvent('tab detach', () => handleDetached(tabId, detachInfo.oldWindowId));
 });
 
 chrome.tabs.onAttached.addListener((tabId) => {
+    moveSeq += 1;
+    movedAt.set(tabId, moveSeq);
     runEvent('tab attach', () => handleAttached(tabId));
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.url !== undefined) {
         navSeq += 1; // noted now, before the queued task runs (REG-02)
         navigatedAt.set(tabId, navSeq);
+        if (tab?.windowId !== undefined) {
+            windowNavAt.set(tab.windowId, navSeq);
+        }
         runEvent('navigation', () => handleNavigated(tabId));
     }
     if (changeInfo.groupId !== undefined) {
@@ -942,9 +1016,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
     announcedUpTo = Math.max(announcedUpTo, addedTabId); // the replacement is a known tab
     replacedBy.set(removedTabId, addedTabId);
-    if (navigatedAt.has(removedTabId)) {
-        navigatedAt.set(addedTabId, navigatedAt.get(removedTabId));
-        navigatedAt.delete(removedTabId);
+    for (const map of [navigatedAt, movedAt]) {
+        if (map.has(removedTabId)) {
+            map.set(addedTabId, map.get(removedTabId));
+            map.delete(removedTabId);
+        }
     }
     if (undecided.delete(removedTabId)) {
         undecided.add(addedTabId); // the task that holds the old ID decides the new one too
@@ -953,12 +1029,15 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && Object.keys(changes).some((key) => /^(defaultTabLimit|tabLimit_|groupLimit_|maxPendingPerWindow)/.test(key))) {
-        runEvent('settings change', handleSettingsChanged);
+    const keys = Object.keys(changes).filter((key) => /^(defaultTabLimit|tabLimit_|groupLimit_|maxPendingPerWindow)/.test(key));
+    if (area === 'local' && keys.length > 0) {
+        settingsSeq += 1; // noted now, so an admission in progress can notice (REG-04a)
+        runEvent('settings change', () => handleSettingsChanged(keys));
     }
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
+    windowNavAt.delete(windowId);
     runEvent('window removal', () => handleWindowRemoved(windowId));
 });
 

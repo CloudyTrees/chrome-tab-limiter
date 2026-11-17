@@ -454,3 +454,84 @@ that asynchronous Chrome APIs can provide an atomic check-and-close operation.
 
 No source fixes, test changes, push or merge are included in this documentation
 update.
+
+---
+
+## Response from Claude to the verification of the fixes (2026-11-17)
+
+**All four follow-up findings are confirmed and fixed.** Before changing anything I
+reproduced each against `098d88f` with my own probes (fresh module instances, the
+existing mock, one-shot API wrappers).
+
+### What I confirmed, before the fix
+
+| # | Probe result at `098d88f` |
+| --- | --- |
+| REG-01a | A tab moved to window 2 and back during its admission was closed (`tabs.remove` was called on it). |
+| REG-04a | With the limit raised to 100 during admission, the new tab was still closed (8 tabs). |
+| REG-04b | Limit 3 → 4 changed the excess from 5 to 4, but the revision stayed 6 before and after, and the push carried revision 6. |
+| REG-02a | Navigating tab 2 during a command that closes tab 1 left the command successful and closed tab 1. |
+
+I agree with the causes. They are the same pattern as before: the first round noted
+navigations synchronously but left moves and settings changes on the queue, and
+guarded only the tabs being closed instead of the window R3 names.
+
+### Fixes (`chrome-tab-limiter/background.js`)
+
+| # | Fix |
+| --- | --- |
+| REG-01a | `onDetached` and `onAttached` now bump a move counter and record a per-tab number, synchronously. The creation task is given the counter value from when its tab was announced. Any move of that tab after that point, even one that ended where it started, stops the decision, and the rejection is also taken back if a move arrives before the final close. The queued move handler classifies it as moved. |
+| REG-04a | `storage.onChanged` bumps a settings counter synchronously. The creation task restarts its reads, up to 3 attempts, when the counter changed while it waited. If the change arrives after the decision but before the close, the rejection is taken back, the tab is kept as a new (pending) tab, and the queued settings handler settles the window. |
+| REG-04b | `handleSettingsChanged` knows which keys changed. A change to the default limit or the pending cap advances the revision of every open operation. A `tabLimit_<id>` or `groupLimit_<id>_…` change advances only that window's. The push carries the new revision, so the popup refreshes and drops its selection. |
+| REG-02a | Navigations are also recorded per window (from the event's tab, a number only). A close command refuses if any tab in its window navigated after the command arrived, before it records `closing` and again before each removal. A navigation in another window does not count, and neither does a title change. The per-tab check stays for tabs that were moved. |
+
+The "pending" fallback in REG-04a is a design choice, so please check it: a tab
+whose rejection is withdrawn because the limits just changed stays open as a new
+tab, which can briefly exceed the pending cap by one. The alternative, closing it
+on limits that were already out of date, is the bug being fixed. The settings
+handler resolves it straight away if the new limits fit.
+
+### Verification
+
+- **13 new tests** in `tests/background.test.js`, each delivering the event during
+  the running task: moved out and back; limit raised before the decision and just
+  before the close; revision, push and a stale command after a partial limit
+  change; one window's limit not touching another window; navigation of an
+  unselected tab during `closeSelected`, between the check and the closing, and
+  during `closePending`; a navigation in a different window and a title change
+  (both must not invalidate).
+- **On the previous `background.js`, 9 of the 13 fail.** The other 4 are controls
+  that must pass either way: a tab that was not moved is still rejected, an
+  unchanged limit still rejects, a navigation in another window and a title change
+  do not invalidate. One test first passed on the old code for the wrong reason (it
+  selected a tab ID that did not exist); I changed it to select real tabs and it now
+  fails there.
+- **Full suite: 211 tests, 0 failures**, and 6 repeated runs were stable.
+- **Live Chrome 157 (throwaway profile, headless):** the earlier scenarios, re-run on
+  this code, gave the same results as before: startup mode, Start enforcing now, the
+  burst of 12 (8 tabs, 5 pending, 5 rejected), moves and groups, commands, real
+  worker suspension and extension reload. The raised-limit case still clears the
+  badge and the operation with no tab event. New: limit 3 → 4 with 2 pending tabs
+  advanced the revision from 5 to 6, the excess went 2 → 1 and the badge `2` → `1`.
+  That live check covers REG-04b only.
+
+### What is still not claimed
+
+- **REG-01a, REG-04a and REG-02a have no live reproduction**, like REG-01 to REG-03
+  before them. They need a browser change timed inside an awaited call, which the
+  live driver cannot place. They rest on deterministic mock interleavings.
+- **The one-API-round-trip window from the first response remains.** A move that
+  lands between the last look and `tabs.remove` is not excluded. Nothing in an
+  asynchronous extension can make check-and-close atomic.
+- **A rejection can still be decided on limits read just before the decision.** The
+  restart is capped at 3 attempts (a settings change on every attempt would exhaust
+  it); the final close check then takes the rejection back, so a closed tab always
+  matches limits that were current at the last look.
+- **Navigation only.** Content changes that produce no URL event (a form being
+  edited) are still not detected, as the review notes.
+- **A command can occasionally be refused because an unrelated tab in the same
+  window navigated during its few milliseconds.** That is R3 as approved, and it
+  costs one extra click.
+- The earlier limits stand: session restore and extension reload were emulated.
+
+Not pushed. Committed as one commit, as requested.
