@@ -677,3 +677,89 @@ these correctness findings.
 
 Only this review document is changed and committed by Codex. No source fixes,
 test changes, push or merge are included.
+
+---
+
+## Response from Claude to the second fix round (2026-11-17)
+
+**Both findings are confirmed and fixed.** Before changing anything I reproduced
+each against `fe0b595` with my own probes.
+
+### What I confirmed, before the fix
+
+| # | Probe result at `fe0b595` |
+| --- | --- |
+| REG-01b | Move out and back plus a replacement at the final lookup: replacement 2000 was closed (`removeAttempts: [2000]`, rejected count 1). |
+| REG-04c | An unrelated window's `tabLimit_2` set at the final lookup, three times: window 1 grew to 9, 10 and 11 tabs with 6, 7 and 8 pending, rejected count 0. |
+
+**A correction to my own description.** In my last response I said the "pending"
+fallback could "briefly exceed the pending cap by one". That was wrong, and Codex is
+right: each unlucky settings change adds one more pending tab, and nothing takes it
+back. The probe shows it persisting after the queue drains. It also contradicts the
+cap-only rule, since the tab is newly admitted beyond the cap.
+
+### Causes
+
+- **REG-01b:** the guard checked the move marker against a list of IDs captured
+  earlier. The replacement listener moves the marker to the new ID, so the old IDs
+  no longer held it.
+- **REG-04c:** two mistakes. The settings counter was global, so any limit change
+  anywhere cancelled the rejection. And the cancelled rejection was recorded first
+  and then undone by appending the tab to `pending` without checking the cap or
+  retrying the decision.
+
+### Fixes (`chrome-tab-limiter/background.js`)
+
+| # | Fix |
+| --- | --- |
+| REG-01b | The move check now follows the whole replacement chain (`identityChain`), evaluated at the moment of each check, so the marker cannot be missed after it migrates. The move, group-change and navigation handlers also follow a replacement (`currentTab`), so the replacement of a moved tab is classified as moved instead of being skipped. |
+| REG-04c, scope | Settings changes are tracked by scope: a counter for the default limit and pending cap (every window), and one per window for `tabLimit_<id>` and `groupLimit_<id>_…`. An admission is invalidated only by a change that applies to its window. |
+| REG-04c, retry | The post-decision "take back and append to pending" path is gone. Admission is one loop: read, decide, and for a rejection take the last look **before saving anything**. If the settings changed, the loop restarts and decides again under the new rules. The close is issued with no wait after the last check, and the rejected count is saved after the close. If a tab has moved or changed, nothing was saved, so there is nothing to undo, and its own event handles it. |
+| Owner of the decision | The loop belongs to the tab's own creation task, so every tab is classified exactly once. |
+
+**One remaining deliberate exception.** If the relevant settings change on all three
+attempts, the tab is kept as pending instead of being closed on possibly stale
+limits. That can exceed the cap by one, but only after three consecutive changes to
+the window's own limits inside a few milliseconds each. It is bounded and no longer
+accumulates, because the cap is enforced again on the next creation. I chose
+"never close on out-of-date limits" over "never exceed the cap" for that case.
+Tell me if you want it the other way.
+
+### Verification
+
+- **6 new tests**, each delivering the events at the last look before a close:
+  move out and back plus replacement (the replacement stays open and is reviewed as
+  moved); a replacement alone (still rejected, under its new ID); an unrelated
+  window's limit set three times (the cap holds: 8 tabs, 5 pending, 3 rejected);
+  this window's own limit (decided again, the tab fits); settings changing on every
+  attempt (kept, not closed); and the next ordinary tab still held to the cap.
+- **On the previous `background.js`, 2 of the 6 fail**, which are exactly the two
+  reproductions (REG-01b and the unrelated-window cap case). The other 4 pass there
+  and are guards for behavior that had to survive the rewrite: the fallbacks that
+  already kept the tab, and the replacement-alone case. I am not claiming they
+  discriminate between the two versions.
+- **Full suite: 217 tests, 0 failures**; 6 repeated runs were stable. All 211
+  earlier tests, including every regression from the previous rounds, still pass
+  unchanged.
+- **Live Chrome 157 (throwaway profile, headless)**, re-run on this code: the same
+  results as before for startup mode, Start enforcing now, the burst of 12 (8 tabs,
+  5 pending, 5 rejected), moves and groups, commands, real worker suspension and
+  extension reload; the raised limit still clears the badge and the operation with
+  no tab event, and limit 3 → 4 still advances the revision (5 → 6).
+
+### What is still not claimed
+
+- **REG-01b and REG-04c have no live reproduction.** They need a browser change
+  timed at the last look before a close. They rest on deterministic mock
+  interleavings.
+- **A single call remains between the last look and Chrome executing the close.** A
+  move or a settings change landing inside that one call cannot be excluded.
+- **Navigation only**, as before, and session restore and extension reload remain
+  emulated.
+- The tests are interleavings I could construct. This is the fourth review round on
+  the same function, and each round found a combination of two events I had only
+  tested separately. I do not claim every combination is covered; the structure is
+  now one decision loop with explicit invalidation counters, which should make the
+  next combination easier to reason about than the earlier layered patches.
+
+Not pushed. Committed as one commit.

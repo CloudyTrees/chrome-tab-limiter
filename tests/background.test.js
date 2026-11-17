@@ -1308,6 +1308,134 @@ describe('follow-up review findings (REGRESSIONS.md, Codex verification)', () =>
     });
 });
 
+describe('second review findings (REGRESSIONS.md, Codex verification of round 2)', () => {
+    beforeEach(() => setup());
+
+    describe('REG-01b: movement plus replacement', () => {
+        it('the replacement inherits the move protection and is reviewed as moved', async () => {
+            await openMany(5);
+            let id;
+            const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+            let calls = 0;
+            harness.chrome.tabs.get = async (tabId) => {
+                if (tabId === id && ++calls === 3) {
+                    harness.moveTab(id, 2);
+                    harness.moveTab(id, 1);
+                    harness.replaceTab(id, 2000);
+                    await flush(1);
+                }
+                return realGet(tabId);
+            };
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.ok(harness.tabIds(1).includes(2000), 'the replacement stays open');
+            assert.equal(harness.calls.removeAttempts.includes(2000), false);
+            const op = await getOp();
+            assert.equal(op.rejectedCount, 0);
+            assert.equal(op.tabs.find((t) => t.id === 2000).status, 'moved');
+        });
+
+        it('a replacement alone at the last look is still rejected, under its new ID', async () => {
+            await openMany(5);
+            let id;
+            const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+            let calls = 0;
+            harness.chrome.tabs.get = async (tabId) => {
+                if (tabId === id && ++calls === 3) {
+                    harness.replaceTab(id, 2000);
+                    await flush(1);
+                }
+                return realGet(tabId);
+            };
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.equal(harness.tabIds(1).includes(2000), false);
+            assert.equal((await getOp()).rejectedCount, 1);
+        });
+    });
+
+    describe('REG-04c: settings changes and the pending cap', () => {
+        it('a limit stored for another window never lets a new tab past the cap', async () => {
+            await openMany(5); // cap full
+            for (const limit of [4, 5, 6]) {
+                let id;
+                const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+                let calls = 0;
+                harness.chrome.tabs.get = async (tabId) => {
+                    if (tabId === id && ++calls === 3) {
+                        await harness.chrome.storage.local.set({ tabLimit_2: limit }); // not window 1
+                        await flush(1);
+                    }
+                    return realGet(tabId);
+                };
+                id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+                await flush(20);
+                harness.chrome.tabs.get = realGet;
+
+                assert.equal(harness.tabIds(1).includes(id), false, `rejected with tabLimit_2 ${limit}`);
+            }
+            const op = await getOp();
+            assert.equal(op.pendingCount, 5, 'the cap held');
+            assert.equal(op.rejectedCount, 3);
+            assert.equal(harness.tabIds(1).length, 8);
+        });
+
+        it('a limit stored for this window is used: the tab is decided again and fits', async () => {
+            await openMany(5);
+            let id;
+            const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+            let calls = 0;
+            harness.chrome.tabs.get = async (tabId) => {
+                if (tabId === id && ++calls === 3) {
+                    await harness.chrome.storage.local.set({ tabLimit_1: 100, groupLimit_1_ungrouped: 100 });
+                    await flush(1);
+                }
+                return realGet(tabId);
+            };
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(20);
+
+            assert.ok(harness.tabIds(1).includes(id));
+            assert.equal(harness.tabIds(1).length, 9);
+            assert.equal(await getOp(), null);
+        });
+
+        it('when settings keep changing it keeps the tab rather than closing on out-of-date limits', async () => {
+            await openMany(5);
+            let id;
+            const realGet = harness.chrome.tabs.get.bind(harness.chrome.tabs);
+            let calls = 0;
+            const limits = [4, 5, 6];
+            harness.chrome.tabs.get = async (tabId) => {
+                if (tabId === id) {
+                    calls += 1;
+                    if (calls % 3 === 0 && limits.length > 0) {
+                        await harness.chrome.storage.local.set({ defaultTabLimit: limits.shift() });
+                        await flush(1);
+                    }
+                }
+                return realGet(tabId);
+            };
+            id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://x.example/' });
+            await flush(30);
+
+            assert.ok(harness.tabIds(1).includes(id), 'not closed');
+            assert.equal(harness.calls.removeAttempts.includes(id), false);
+            assert.equal((await getOp()).rejectedCount, 0);
+        });
+
+        it('the next ordinary creation is still held to the cap afterwards', async () => {
+            await openMany(5);
+            await harness.chrome.storage.local.set({ tabLimit_2: 5 });
+            await flush();
+            const next = await open();
+            assert.equal(harness.tabIds(1).includes(next), false);
+        });
+    });
+});
+
 // ---------------------------------------------------------- message security
 
 describe('message security', () => {
