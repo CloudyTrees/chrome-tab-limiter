@@ -11,8 +11,8 @@ understanding of the dashboard, which I could not open; if a label differs, trus
 1. Register as a developer (one-time fee) and verify your contact email.
 2. `tools/release.sh`, then create a **new item** and upload `dist/tab-limiter-1.0.0.zip`.
 3. Fill in the **Store listing**, **Privacy** and **Distribution** tabs with the text below.
-4. Make sure `PRIVACY.md` and `CAVEATS.md` are on `main` of the public repository (you push; I never
-   do), then paste the privacy policy URL into the dashboard. It is required, see below.
+4. Paste the privacy policy URL into the dashboard (both links were fetched and load; see below). It is
+   required.
 5. Submit for review. After it is accepted, `git tag v1.0.0 <commit that release.sh printed>`.
 
 ## Store listing tab
@@ -153,17 +153,17 @@ the extension reads tab titles is the answer a reviewer is likely to question.
 https://github.com/CloudyTrees/chrome-tab-limiter/blob/main/PRIVACY.md
 ```
 
-The file is `PRIVACY.md` at the repository root. For this link to work for Google's reviewers and for
-users, **all of these must be true**, and I could not check them (I have no `gh` here, and
-looking the repository up would send its name to GitHub):
+The file is `PRIVACY.md` at the repository root. Status, as of 2026-11-17:
 
-1. The repository is **public**. A private repository's files return "404" to everyone else.
-2. `PRIVACY.md` is **pushed to `main`**. The link names the `main` branch.
-3. If you rename the repository or the branch, the link breaks. Keep it stable, or update the
-   dashboard.
+1. The repository is **public** (confirmed by the owner).
+2. `PRIVACY.md` and `CAVEATS.md` are **on `main`** of `origin`, and both URLs returned HTTP 200 when
+   fetched without credentials on 2026-11-17. The served `PRIVACY.md` carried the corrected wording
+   and not the retracted claim.
+3. The link names the `main` branch and the repository's name. If you rename either, it breaks, so
+   keep them stable or update the dashboard.
 
-Making the repository public also publishes everything in it: `REVIEW.md`, `REGRESSIONS.md`,
-`HUMAN-DECISION.md`, the specs and the whole history. Read through them once before you flip it.
+Because the repository is public, so are `REVIEW.md`, `REGRESSIONS.md`, `HUMAN-DECISION.md`, the
+specs and the whole history.
 
 I wrote the policy from this code, not from a template, because a policy must describe *your*
 extension and copying someone else's would assert facts about theirs. Its structure is the common one
