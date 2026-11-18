@@ -664,7 +664,7 @@ function renderDecision(operation) {
     byId('decisionHint').textContent =
         operation.kind === 'startup'
             ? 'Nothing is closed automatically. Keep these tabs, or choose which to close.'
-            : 'Choose tabs to close, or close the new tabs. Nothing closes until you confirm.';
+            : 'Choose tabs to close, or close the new tabs. Tabs you have open close only when you confirm.';
 
     byId('tabChoiceList').replaceChildren(
         ...operation.tabs.map((tab) => {

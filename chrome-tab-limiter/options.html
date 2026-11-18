@@ -37,7 +37,7 @@
                 <div class="subsection">
                     <h3>Export Settings</h3>
                     <p class="description">
-                        Export all your tab limits, group limits, and preferences to a file for backup or transfer to another device.
+                        Save your limits to a file as a backup. Importing a file restores only the default limit and the pending-tab limit; window and group limits are not imported and must be set again.
                     </p>
                     <div class="action-group">
                         <button id="exportButton" class="primary-btn">
@@ -51,7 +51,7 @@
                 <div class="subsection">
                     <h3>Import Settings</h3>
                     <p class="description">
-                        Import previously exported settings. This will replace your current settings.
+                        Import a previously exported file. This replaces your current settings: the default limit and pending-tab limit come from the file, and your existing window and group limits are removed.
                     </p>
                     <div class="action-group">
                         <input type="file" id="importFile" accept=".json" style="display: none;">
@@ -122,7 +122,7 @@
                     </div>
                     <div class="privacy-item">
                         <h4>🚫 No Data Collection</h4>
-                        <p>This extension does not collect or transmit any data. Tab titles and URLs are read only to show the tab list in the popup and are never written to storage. Decisions in progress are kept in memory as window and tab IDs and counts.</p>
+                        <p>This extension does not collect or transmit any data. Chrome makes tab titles and addresses available to it; it processes them in memory on your device (to show the tab list and to notice when a tab navigates) and never writes them to storage or sends them anywhere. Decisions in progress are kept in memory as window and tab IDs and counts.</p>
                     </div>
                 </div>
             </section>

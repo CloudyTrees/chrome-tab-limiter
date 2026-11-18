@@ -12,8 +12,10 @@ A Chrome extension that helps you manage tab overload by setting maximum tab lim
 ### Advanced Features
 - **Tab Group Support**: Set separate limits for different tab groups within a window
 - **Ungrouped Tab Limits**: Control tabs that aren't in any group separately
-- **Export/Import Settings**: Backup and restore all your tab limit configurations
+- **Export/Import Settings**: Export your limits to a file as a backup. Import restores only the default limit and the pending-tab limit; window and group limits are not imported and must be set again, and an import removes your existing window and group limits
 - **Clean UI**: Simple popup interface for quick limit adjustments
+
+> **Assumptions, caveats and known limits:** see [CAVEATS.md](../CAVEATS.md). **Privacy policy:** [PRIVACY.md](../PRIVACY.md).
 
 ## Installation
 
@@ -74,7 +76,7 @@ Your first decision of any kind also ends startup mode.
 1. Click the extension icon
 2. Click "⚙️ Settings" at the bottom
 3. Use "Export Settings" to download a JSON backup
-4. Use "Import Settings" to restore from a backup file
+4. Use "Import Settings" to restore the default limit and the pending-tab limit from a backup file. Window and group limits are **not** restored, and an import removes the ones you have now
 
 ## File Structure
 ```
@@ -167,13 +169,12 @@ checklist in `REVIEW.md`.
 
 ### Settings Not Saving
 - Look for storage quota errors in console
-- Try export/import as a workaround
 
 ## Permissions
 
 The extension asks for three permissions and no host access:
 
-- **`tabs`**: lets it read each tab's `title`, `url` and group, which Chrome withholds without this permission. It uses titles and groups to count tabs and to show you which tab to close; it does not use the URL. The permission does let the extension see the URL of every open tab, so it is the most sensitive one. Nothing is sent anywhere (see Privacy), and tab URLs and titles are never written to storage.
+- **`tabs`**: makes each tab's `title` and `url` (and two other address fields) available to the extension; Chrome withholds them without this permission. Counting tabs and receiving tab events do not need it. The extension uses titles to show which tab to close, and uses the fact that a tab's address changed to notice navigation; it does not otherwise use addresses. The permission lets it see the address of every open tab, so it is the most sensitive one. Nothing is sent anywhere (see Privacy), and tab URLs and titles are never written to storage.
 - **`storage`**: saves your limits locally.
 - **`tabGroups`**: reads tab group names and colors so groups can have their own limits.
 
@@ -190,9 +191,14 @@ This extension:
 - Requests no host, history, cookie, or web-request permissions and injects no content scripts
 - Exports settings only when you ask, as a local JSON file named `tab-limiter-settings.json`. It holds your limits, how many you set, the extension version and numbered labels (`window_1`, `group_1`) that show which group limits share a window. It has no real window or group IDs, titles, URLs or dates.
 
-## License
+## License and warranty
 
-For personal use only. Feel free to modify for your own needs.
+Released under CC0 1.0 (public domain); see `LICENSE`. Use, copy and modify it freely.
+
+It is provided as is, with no warranty of any kind: use it at your own risk. The author uses it
+too and takes the same risk. Friends and anyone else who installs it are welcome to report bugs
+and ask for features in the repository's issue tracker, but nothing is promised: no support, no
+response time and no guarantee of fixes.
 
 ## Credits
 
