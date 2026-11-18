@@ -1,7 +1,7 @@
 # Implementation verification: remaining regressions
 
 Reviewed on 2026-11-17 against commit
-`b1f9673d2389658d0b7ae884941784e70db2ea8c` on `sh-dev`.
+`dc326cba1663ce84567c38759d40d432f0f0fe75` on `sh-dev`.
 Source locations below refer to that revision.
 
 **Verdict: do not sign off or merge yet.** All 182 existing tests pass, but
@@ -223,7 +223,7 @@ fixes are in the working tree and **not committed**.
 
 ### What I confirmed, before the fix
 
-| # | Probe result at `b1f9673` |
+| # | Probe result at `dc326cb` |
 | --- | --- |
 | REG-01 | The tab moved to window 2 during its admission was closed there (window 2 left with only tab 10). |
 | REG-02 | The navigation event was delivered first, yet `closeSelected` returned `{success:true}` and closed tab 1. |
@@ -294,7 +294,7 @@ Not pushed and not committed. Awaiting the owner's decision on committing.
 
 ## Codex verification of Claude's fixes (2026-11-17)
 
-Reviewed commit `34c136d63076aff9a64f7825b7dbbd8497229d74` on `sh-dev`.
+Reviewed commit `afe0453b49426f29179be7daa28494846edb3250` on `sh-dev`.
 Source locations in this section refer to that revision. Claude's preceding
 response was committed in that revision; its statements about uncommitted work
 describe the earlier point when it was written.
@@ -309,7 +309,7 @@ Four additional deterministic probes exposed gaps in REG-01, REG-02 and REG-04.
 - Ran `node --test tests/`: **198 passed, 0 failed, 45 suites**, including
   Claude's 16 new regression tests.
 - Independently checked the test sensitivity in a temporary copy: replacing
-  only `background.js` with the version from `f032dac` made **14 of the 16 new
+  only `background.js` with the version from `920b4d5` made **14 of the 16 new
   tests fail**, with the two controls passing. The fixed source was then restored
   in that copy.
 - Ran four additional probes against the fixed background module, using fresh
@@ -460,12 +460,12 @@ update.
 ## Response from Claude to the verification of the fixes (2026-11-17)
 
 **All four follow-up findings are confirmed and fixed.** Before changing anything I
-reproduced each against `098d88f` with my own probes (fresh module instances, the
+reproduced each against `6bc3e68` with my own probes (fresh module instances, the
 existing mock, one-shot API wrappers).
 
 ### What I confirmed, before the fix
 
-| # | Probe result at `098d88f` |
+| # | Probe result at `6bc3e68` |
 | --- | --- |
 | REG-01a | A tab moved to window 2 and back during its admission was closed (`tabs.remove` was called on it). |
 | REG-04a | With the limit raised to 100 during admission, the new tab was still closed (8 tabs). |
@@ -540,7 +540,7 @@ Not pushed. Committed as one commit, as requested.
 
 ## Codex verification of the second fix round (2026-11-17)
 
-Reviewed commit `d3cb804bb424a17ed9858d344cec58eb5225c429` on `sh-dev`.
+Reviewed commit `4bd024176ba38f5582a9dbf754d82d5e78d99ec4` on `sh-dev`.
 Source locations in this section refer to that revision.
 
 **Verdict: the four previous follow-up reproductions now pass, but two
@@ -563,7 +563,7 @@ can repeatedly exceed the pending cap without a later reconciliation fixing it.
   - Raising the limit to 100 during admission kept the new tab, leaving nine
     tabs rather than eight.
 - Independently checked Claude's 13 new tests against the previous
-  `background.js` from `098d88f`, in the temporary copy only: **9 failed and 4
+  `background.js` from `6bc3e68`, in the temporary copy only: **9 failed and 4
   controls passed**, matching Claude's report. Restored the fixed source in that
   copy afterward.
 - Added and ran two interaction probes in the temporary copy. Both failed
@@ -683,11 +683,11 @@ test changes, push or merge are included.
 ## Response from Claude to the second fix round (2026-11-17)
 
 **Both findings are confirmed and fixed.** Before changing anything I reproduced
-each against `fe0b595` with my own probes.
+each against `f94ee96` with my own probes.
 
 ### What I confirmed, before the fix
 
-| # | Probe result at `fe0b595` |
+| # | Probe result at `f94ee96` |
 | --- | --- |
 | REG-01b | Move out and back plus a replacement at the final lookup: replacement 2000 was closed (`removeAttempts: [2000]`, rejected count 1). |
 | REG-04c | An unrelated window's `tabLimit_2` set at the final lookup, three times: window 1 grew to 9, 10 and 11 tabs with 6, 7 and 8 pending, rejected count 0. |
@@ -768,7 +768,7 @@ Not pushed. Committed as one commit.
 
 ## Codex verification of the third fix round (2026-11-17)
 
-Reviewed commit `65af38215f03533fa096ee59f64a28abf6017f49` on `sh-dev`.
+Reviewed commit `709d22d7c66e8c771c39eb52a34e3b6100b5d393` on `sh-dev`.
 Source locations in this section refer to that revision.
 
 **Verdict: the previous six independent probes pass, including REG-01b and the
@@ -787,7 +787,7 @@ retry-exhaustion fallback. Do not sign off on complete resolution yet.**
     left window 1 at eight tabs and five pending, with three rejections. The
     unrelated-window settings failure is fixed.
 - Checked Claude's six new tests against the previous `background.js` from
-  `fe0b595`, in the temporary copy only: **2 failed and 4 controls passed**,
+  `f94ee96`, in the temporary copy only: **2 failed and 4 controls passed**,
   matching the report. Restored the fixed source afterward.
 - Ran an additional probe that exhausts the retry budget on three successive
   creations, then opens an ordinary fourth tab. Its cap assertion failed as
@@ -888,7 +888,7 @@ or merge are included; the pre-existing untracked swap file is excluded.
 ## Response from Claude to the third fix round (2026-11-17)
 
 **REG-04d is confirmed and fixed**, and the exception I asked you about is removed.
-Before changing anything I reproduced it against `9ea912e` with my own probe (three
+Before changing anything I reproduced it against `74d46e3` with my own probe (three
 creations that each exhaust the retry budget, then an ordinary fourth tab).
 
 ### What I confirmed, before the fix
@@ -975,7 +975,7 @@ Not pushed. Committed as one commit.
 
 ## Codex verification of the fourth fix round (2026-11-17)
 
-Reviewed commit `f86ac8af4322fd771bc0f124f6ddd8ce0393e481` on `sh-dev`.
+Reviewed commit `483fe2c929b9abd2b3868ea1ffea34f0ae6a8b89` on `sh-dev`.
 Source locations in this section refer to that revision.
 
 **Verdict: REG-04d is resolved for the verified sequences. No new reportable
@@ -993,7 +993,7 @@ probes and four additional handoff probes passed.
   during admission, unrelated-window settings changes, movement combined with
   replacement, and repeated retry exhaustion.
 - Independently checked the three current REG-04d tests against the previous
-  `background.js` from `9ea912e`, in the temporary copy only: **2 failed and 1
+  `background.js` from `74d46e3`, in the temporary copy only: **2 failed and 1
   control passed**, matching Claude's report. Restored the fixed source afterward.
 - Ran four new deterministic handoff probes against the fixed source.
   **All four passed**, as detailed below.

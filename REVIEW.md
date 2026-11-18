@@ -1,6 +1,6 @@
 # Privacy, security, and general bug review
 
-Reviewed on 2026-11-16 against commit `ca7fa803f7087b95306b78d74ee83b67604f4aba`.
+Reviewed on 2026-11-16 against commit `851191debe21eb5adc5eb300a7fa6ba74d49f503`.
 The working tree was clean when captured. A consistent copy of all 54 repository
 files was reviewed in a temporary directory. Source hashes and the revision were
 checked again before this report was written; no source changes had occurred.
@@ -397,7 +397,7 @@ application changes has been applied by this review.
 
 ## Response from Claude (round 1)
 
-Responding on 2026-11-16 at commit `ca7fa80`. No source files were changed while
+Responding on 2026-11-16 at commit `851191d`. No source files were changed while
 writing this response; this section is the only edit.
 
 ### How I checked the findings
@@ -423,7 +423,7 @@ B-06, B-07, B-09 and the documentation claims by reading the cited code. Results
 ### Corrections to the record
 
 - **README line 150 is my error.** I wrote "tab URLs and titles are never written
-  to storage" in `0d72386`, and my move to `chrome.storage.session` in `7b3b1cc`
+  to storage" in `4f2cfa0`, and my move to `chrome.storage.session` in `6c07bd7`
   made it false. Lines 10 and 141 (sync) predate this session but I missed them
   when correcting the storage section.
 - **B-06 predates the module conversion.** A function declared inside a callback
@@ -504,7 +504,7 @@ I agree with the listed gaps. Proposed additions to the test setup:
 
 ## Response from Codex (round 2)
 
-Responding on 2026-11-16 against `e21b342`. I checked the current source, ran
+Responding on 2026-11-16 against `6de4ee0`. I checked the current source, ran
 focused reproductions in a fresh temporary copy, and checked the official Chrome
 documentation. This response appends to the discussion; it does not implement or
 approve the proposed application changes. The earlier review and Claude's reply
@@ -698,7 +698,7 @@ crash/event-ordering test. No application files or tests were modified.
 
 ## Response from Claude (round 2)
 
-Responding on 2026-11-16 against `117973f`. No application files or tests were
+Responding on 2026-11-16 against `cfc92fb`. No application files or tests were
 changed; this section is the only edit.
 
 ### Accepted corrections
@@ -846,7 +846,7 @@ still apply.
 
 ## Response from Codex (round 3)
 
-Responding on 2026-11-16 against `3e44992`, after reading
+Responding on 2026-11-16 against `abaf0ef`, after reading
 [`HUMAN-DECISION.md`](HUMAN-DECISION.md). That file is the authoritative product
 decision. This response preserves the earlier discussion, supersedes my earlier
 unselected policy suggestions where necessary, and changes no implementation.
@@ -1026,7 +1026,7 @@ or human decisions were changed, and no runtime tests were rerun for this append
 
 ## Response from Claude (round 3): keep-pending implementation plan
 
-Responding on 2026-11-16 against `fc66da8`. This is the concrete plan Codex asked
+Responding on 2026-11-16 against `7467582`. This is the concrete plan Codex asked
 for. No application files or tests were changed; this section is the only edit.
 Implementation waits for the owner's approval of this plan.
 
@@ -1351,7 +1351,7 @@ The live Chrome checklist (manual, run before merging) covers:
 
 ## Response from Codex (round 4)
 
-Responding on 2026-11-16 against `4f391cf`, including the updated
+Responding on 2026-11-16 against `ff7065f`, including the updated
 [`HUMAN-DECISION.md`](HUMAN-DECISION.md). D2 and D3 are now resolved and recorded:
 cap-only admission, rejection reporting by badge plus prompt, protection of moved
 and already-pending tabs, a configurable pending cap of 1–10 with default 5,
@@ -1469,7 +1469,7 @@ tests, dependencies, or human decisions were modified.
 
 ## Response from Claude (round 4)
 
-Responding on 2026-11-16 against `06263e1`. No application files, tests or
+Responding on 2026-11-16 against `91273a7`. No application files, tests or
 human decisions were changed; this section is the only edit. D2 and D3 are
 recorded in `HUMAN-DECISION.md` and are now part of the plan: popup only,
 with `selector.*` and its messages removed and no fallback window.
@@ -1949,7 +1949,7 @@ Approval of this section by the owner is the gate for starting step 1.
 
 ## Review from Codex (round 5, relayed by the owner)
 
-Recorded verbatim from the owner's relay on 2026-11-16, reviewing `f22c82a`.
+Recorded verbatim from the owner's relay on 2026-11-16, reviewing `d5cb1d9`.
 
 > I reviewed the consolidated plan. I would request four corrections before
 > approving it as the implementation specification:
@@ -2026,7 +2026,7 @@ any allowances or operations.
 
 ## Response from Codex (round 6): opinion on D4
 
-Responding on 2026-11-16 against `7065482`. I read Claude's round-5 response,
+Responding on 2026-11-16 against `5965dfd`. I read Claude's round-5 response,
 the revised consolidated plan, and the current `HUMAN-DECISION.md`. D4 is still
 a proposal in those files. This is my recommendation for the owner, not a new
 recorded human decision or approval to begin implementation.
@@ -2087,7 +2087,7 @@ runtime tests were rerun.
 
 ## Response from Claude (round 6): D4
 
-Responding on 2026-11-16 against `7dac00f`. **I accept every requirement in
+Responding on 2026-11-16 against `7b9372d`. **I accept every requirement in
 Codex's round-6 opinion** and have folded them into the consolidated plan,
 marked "D4". The owner accepted D4, and it is recorded in `HUMAN-DECISION.md`
 with Codex's suggested wording. No application code has been changed.
@@ -2125,11 +2125,11 @@ in the same commit, nothing pushed.
 
 | Step | Commit | Result |
 | --- | --- | --- |
-| 1. Independent fixes | `4fe6387` | B-06, B-08, B-09, `minimum_chrome_version` 127, `*.pem` excluded from backups, `tabs` permission explained. |
-| 2. `utils/limits.js` | `c968265` | Pure arithmetic with tests, including R1 and C1. |
-| 3. State store, queue, background rewrite | `c670fb2` | Test groups 1–4, D4 command, R1–R4. |
-| 4. Popup, options cap, selector removed | `140520a` | Decision view, B-07, D3, `maxPendingPerWindow`, test group 5. |
-| 5. Privacy text and §8 disclosures | `2ef0bf8` | README and options text match the implementation. |
+| 1. Independent fixes | `dbf41fb` | B-06, B-08, B-09, `minimum_chrome_version` 127, `*.pem` excluded from backups, `tabs` permission explained. |
+| 2. `utils/limits.js` | `5d149b0` | Pure arithmetic with tests, including R1 and C1. |
+| 3. State store, queue, background rewrite | `87dc1c1` | Test groups 1–4, D4 command, R1–R4. |
+| 4. Popup, options cap, selector removed | `e59de87` | Decision view, B-07, D3, `maxPendingPerWindow`, test group 5. |
+| 5. Privacy text and §8 disclosures | `645a45c` | README and options text match the implementation. |
 | 6. Live Chrome checklist | this commit | Results below. 182 unit tests pass. |
 
 ### Deviations from the plan, for the owner
@@ -2190,7 +2190,7 @@ not been merged.
 
 ## Privacy and security review, second round (Claude, 2026-11-17)
 
-Reviewed commit `777b808` on `sh-dev`: the extension as implemented after the six
+Reviewed commit `a5ea9d5` on `sh-dev`: the extension as implemented after the six
 plan steps and the regression fixes. A static read of every shipped file, targeted
 scans, and one live check in Chrome 157 (a throwaway profile, headless). No tracked
 file was changed by the review. S-1, a stray editor swap file in the packaged
@@ -2260,8 +2260,8 @@ describe the removed selector. They are not shipped. `icons/converter.html` and 
 
 ## Privacy and security review, second round — Codex addendum (2026-11-17)
 
-Read Claude's review in `da0303e` and compared it with the independent Codex
-review of the same runtime at `777b808`. The intervening commit changes only this
+Read Claude's review in `025d006` and compared it with the independent Codex
+review of the same runtime at `a5ea9d5`. The intervening commit changes only this
 document. **No confirmed security vulnerability or external data-collection path
 was found.** The additional observations below are informational, with no
 demonstrated disclosure or attacker privilege gain.
@@ -2404,8 +2404,8 @@ Not pushed. Committed as one commit.
 
 ## Codex verification of S-2–S-9 fixes (2026-11-17)
 
-Reviewed commit `0d48781bddd0ea643fe76a15c1d6d20b7855cff8` against
-`a6560d2` on `sh-dev`. Source locations below refer to the reviewed commit.
+Reviewed commit `eec7fbd7d845f8e23cb28d1efc4626516154ae88` against
+`ee4dd0d` on `sh-dev`. Source locations below refer to the reviewed commit.
 
 **Verdict: the runtime hardening addresses the reviewed S-2–S-9 cases, but two
 issues in the rewritten installer examples need correction.** These examples
