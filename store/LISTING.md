@@ -133,12 +133,24 @@ says disclosure is required "even when data is processed or stored locally on a 
 and defines handling as collecting, transmitting, using or sharing. Tab Limiter reads tab titles and
 the address changes of tabs, and keeps neither.
 
-My recommendation is to be conservative:
+My recommendation:
 
-- Tick **Web browsing activity** (it observes tab titles and navigation events) and, if the dashboard
-  offers it, **Website content** (the page title is page text).
+- Tick **Web history**. In the dashboard this is the label for what Google's FAQ calls "web browsing
+  activity". Secondary sources describe it as the list of pages a user has visited *and associated
+  data such as page titles*; Tab Limiter handles the titles and addresses of open tabs and notices
+  when a tab navigates, so this is the honest box even though it keeps no history. If the
+  dashboard's own help text for the option reads differently, follow the dashboard.
+- Leave **Website content** unticked. It means page text, images, sounds, video and links, and the
+  extension never reads page content (no host permission, no content script). A tab *title* is
+  covered by Web history, not by this one.
+- Leave **User activity** unticked. It means network monitoring, clicks, mouse position, scrolling and
+  keystroke logging. The extension has no content scripts and no network-monitoring permission, and
+  it records none of these. Its only click and key handlers are on its own popup and options pages
+  (pressing a button, or Enter to save a limit), and nothing about them is stored or sent. The tab
+  events it receives (opened, closed, moved, navigated) are browsing activity, already covered by
+  Web history.
 - Leave every other box (personal information, health, financial, authentication, communications,
-  location, user activity, and so on) unticked. The extension handles none of them.
+  location, and so on) unticked. The extension handles none of them.
 - Tick all three certifications. They are true: the data is not sold or transferred to third parties,
   is not used for anything unrelated to the extension's single purpose, and is not used for
   creditworthiness or lending.
@@ -179,29 +191,36 @@ the policy first.
 
 | Field | Value |
 | --- | --- |
-| Visibility | **Unlisted** (see below) |
+| Visibility | **Private** (see below). Fallback: Unlisted. |
 | Pricing | Free |
 | Regions | All regions (default) |
 
-### What Unlisted means
+### Which visibility
 
 Per Google's [distribution documentation](https://developer.chrome.com/docs/webstore/cws-dashboard-distribution):
-Public lists the item in the store for everyone. **Unlisted** creates no store listing, but anyone who
-knows the item's Chrome Web Store URL can install it. **Private** limits installation to people you
-name (trusted testers by Google account email, or a Google Group you manage).
 
-Your assumption is right: nobody finds an unlisted item by browsing the store, and it is installable
-by whoever you give the link to. Three things to know:
+- **Public** lists the item in the store for everyone.
+- **Unlisted** creates no store listing, but anyone who knows the item's Chrome Web Store URL can install it.
+- **Private** limits installation to specified users: trusted testers (listed in your developer
+  account settings; each email must belong to a Google Account), plus any Google Groups you own or
+  manage.
 
-- It still goes through **the same review and the same policy requirements** as a public item. The
-  privacy policy, permission justifications and screenshots are still required.
-- The URL is not a secret. Anyone who gets it can install it, and Google's page does not say
-  whether search engines may index it. Do not post it somewhere you would not want strangers to see it.
-- If you want installs limited to yourself, **Private** with your own Google account as a trusted
-  tester is the tighter option. Unlisted is the better fit if you want to hand the link to friends.
+All three go through the same review and the same policy requirements, so the privacy policy,
+permission justifications and screenshots are required whichever you choose.
 
-I could not confirm from the documentation whether visibility can be changed after publishing; check
-the dashboard before relying on it.
+**Recommended: Private**, because the extension is for the owner (about 99% of use) and a few friends
+(about 1%). Nobody who stumbles on the URL can install it, which also keeps strangers out of the issue
+tracker. The cost is that each friend needs a Google account and must be added by email. Choose
+Unlisted instead if a friend has no Google account or you would rather hand out a bare link; its URL
+is not a secret and Google's page does not say whether search engines may index it.
+
+Facts from the documentation: the trusted-tester list belongs to the developer *account*, not to one
+item; Google Groups are added per item.
+
+**Not stated in the documentation, so check in the dashboard:** whether the publisher account can
+install its own Private item (add your own email to the tester list to be safe), exactly how a tester
+installs and whether they must be signed into Chrome with that account, whether visibility can be
+changed after publishing, and whether there is a maximum number of testers.
 
 ## Test instructions for the reviewer (optional field)
 
