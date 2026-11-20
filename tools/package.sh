@@ -5,7 +5,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-src="$root/chrome-tab-limiter"
+src="$root/extension"
 
 # Everything the extension needs to run, and nothing more
 files=(

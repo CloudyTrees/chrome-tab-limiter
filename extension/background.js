@@ -1,6 +1,6 @@
 // Background service worker for Tab Limiter.
 //
-// Enforcement model: "keep-pending" (REVIEW.md, consolidated plan). A new tab
+// Enforcement model: "keep-pending" (docs/review.md, consolidated plan). A new tab
 // that would exceed a limit stays open as *pending* until the user decides in
 // the popup; at most `maxPendingPerWindow` tabs wait, and later ones are
 // rejected. Nothing is closed automatically after a browser start until the

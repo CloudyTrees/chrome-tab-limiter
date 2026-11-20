@@ -1,4 +1,4 @@
-// Pure limit arithmetic for Tab Limiter (REVIEW.md, consolidated plan §2 and §5).
+// Pure limit arithmetic for Tab Limiter (docs/review.md, consolidated plan §2 and §5).
 // No chrome.* calls, no storage, no clock: everything is a function of its inputs,
 // so the background worker and the popup preview can share it and Node can test it.
 //

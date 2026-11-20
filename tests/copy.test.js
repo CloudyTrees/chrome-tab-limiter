@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 // facts must stay stated. Behavior itself is tested elsewhere (export-import.test.js,
 // limits.test.js, background.test.js); this guards what the words say.
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const popupJs = read('chrome-tab-limiter/popup.js');
-const optionsHtml = read('chrome-tab-limiter/options.html');
-const readme = read('chrome-tab-limiter/README.md');
+const popupJs = read('extension/popup.js');
+const optionsHtml = read('extension/options.html');
+const readme = read('README.md');
 const privacy = read('PRIVACY.md');
 const caveats = read('CAVEATS.md');
 const listing = read('store/LISTING.md');
@@ -84,5 +84,10 @@ describe('"Keep these" is described as counting only tabs that are neither pendi
         assert.doesNotMatch(flat(caveats), /to the number of tabs it has now/);
         assert.match(flat(caveats), /neither \*pending\* nor \*moved\*/);
         assert.match(flat(caveats), /can still be over its allowance/);
+    });
+
+    it('README.md says the same: pending and moved tabs are not covered', () => {
+        assert.doesNotMatch(flat(readme), /grandfather the tabs that are there now/);
+        assert.match(flat(readme), /Pending tabs and tabs dragged in are not covered, so the window can still be over afterward/);
     });
 });

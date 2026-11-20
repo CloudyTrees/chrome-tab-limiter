@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { remainingNeeds, canCloseSelection } from '../chrome-tab-limiter/utils/selection.js';
+import { remainingNeeds, canCloseSelection } from '../extension/utils/selection.js';
 
 const tab = (id, reduces) => ({ id, reduces });
 

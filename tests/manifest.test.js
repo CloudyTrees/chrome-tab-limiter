@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 
-const ROOT = new URL('../chrome-tab-limiter/', import.meta.url);
+const ROOT = new URL('../extension/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', ROOT), 'utf8'));
 const csp = Object.fromEntries(
     manifest.content_security_policy.extension_pages

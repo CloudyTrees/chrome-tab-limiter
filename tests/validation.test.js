@@ -6,7 +6,7 @@ import {
     validateMessageRequest,
     parseLimitInput,
     VALID_ACTIONS
-} from '../chrome-tab-limiter/utils/validation.js';
+} from '../extension/utils/validation.js';
 
 const SELF = { id: 'ext-id', origin: 'chrome-extension://ext-id/' };
 

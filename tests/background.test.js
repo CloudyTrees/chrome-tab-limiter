@@ -9,7 +9,7 @@ import { createChromeMock, flush, EXTENSION_ID, EXTENSION_ORIGIN } from './helpe
 let instance = 0;
 async function startServiceWorker(harness) {
     globalThis.chrome = harness.chrome;
-    await import(new URL(`../chrome-tab-limiter/background.js?sw=${++instance}`, import.meta.url));
+    await import(new URL(`../extension/background.js?sw=${++instance}`, import.meta.url));
     await flush();
 }
 
@@ -655,7 +655,7 @@ describe('startup mode (D1)', () => {
         harness = createChromeMock({ tabs: overLimitSession() });
         await harness.chrome.storage.local.set({ defaultTabLimit: 3 });
         globalThis.chrome = harness.chrome;
-        const importing = import(new URL(`../chrome-tab-limiter/background.js?sw=${++instance}`, import.meta.url));
+        const importing = import(new URL(`../extension/background.js?sw=${++instance}`, import.meta.url));
         await importing;
         const id = harness.userOpensTab({ windowId: 1, pendingUrl: 'https://early.example/' }); // before init finished
         await flush();
@@ -879,7 +879,7 @@ function once(obj, name, hook) {
     };
 }
 
-describe('browser changes while a task is running (REGRESSIONS.md)', () => {
+describe('browser changes while a task is running (docs/regressions.md)', () => {
     beforeEach(() => setup());
 
     describe('REG-01: a tab moved during its own admission', () => {
@@ -1114,7 +1114,7 @@ describe('browser changes while a task is running (REGRESSIONS.md)', () => {
     });
 });
 
-describe('follow-up review findings (REGRESSIONS.md, Codex verification)', () => {
+describe('follow-up review findings (docs/regressions.md, Codex verification)', () => {
     beforeEach(() => setup());
 
     describe('REG-01a: moved out and back during admission', () => {
@@ -1308,7 +1308,7 @@ describe('follow-up review findings (REGRESSIONS.md, Codex verification)', () =>
     });
 });
 
-describe('second review findings (REGRESSIONS.md, Codex verification of round 2)', () => {
+describe('second review findings (docs/regressions.md, Codex verification of round 2)', () => {
     beforeEach(() => setup());
 
     describe('REG-01b: movement plus replacement', () => {

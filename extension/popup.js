@@ -530,7 +530,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 // ----------------------------------------------------------------------------
-// Decision view: what to do when a window is over a limit (REVIEW.md plan §6)
+// Decision view: what to do when a window is over a limit (docs/review.md plan §6)
 // ----------------------------------------------------------------------------
 
 let decisionState = null; // latest getState response

@@ -1,12 +1,19 @@
 {
   "name": "chrome-tab-limiter-dev",
   "private": true,
-  "description": "Development tooling for the Tab Limiter extension (not shipped; the extension lives in chrome-tab-limiter/).",
+  "description": "Development tooling for the Tab Limiter extension (not shipped; the extension lives in extension/).",
+  "license": "CC0-1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CloudyTrees/chrome-tab-limiter.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test",
+    "package": "tools/package.sh",
+    "release": "tools/release.sh"
   }
 }

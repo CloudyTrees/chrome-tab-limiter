@@ -23,7 +23,7 @@ understanding of the dashboard, which I could not open; if a label differs, trus
 | Summary | Taken from the manifest `description` (max 132 characters). Current text, 118 characters: *Limit the number of open tabs per window. Requires tab access to count and manage tabs. All data stored locally only.* |
 | Category | Productivity (**CHECK**: pick a sub-category such as "Tools" or "Workflow & planning" if it asks) |
 | Language | English |
-| Store icon | `chrome-tab-limiter/icons/icon128.png` (128x128) |
+| Store icon | `extension/icons/icon128.png` (128x128) |
 | Screenshots | The five files in `store/screenshots/`, in numeric order (1280x800 JPEG) |
 | Small promo tile (440x280) | Optional. Not made. |
 | Marquee promo tile (1400x560) | Optional. Not made. |
@@ -74,7 +74,7 @@ Assumptions, caveats and known limits: https://github.com/CloudyTrees/chrome-tab
 Privacy policy: https://github.com/CloudyTrees/chrome-tab-limiter/blob/main/PRIVACY.md
 ```
 
-Every sentence above was checked against `chrome-tab-limiter/README.md` and the code. Keep it that
+Every sentence above was checked against `README.md` and the code. Keep it that
 way if you edit it: the store rejects descriptions that promise what the extension does not do.
 
 ### Screenshots (store/screenshots/)
@@ -174,8 +174,8 @@ The file is `PRIVACY.md` at the repository root. Status, as of 2026-11-17:
 3. The link names the `main` branch and the repository's name. If you rename either, it breaks, so
    keep them stable or update the dashboard.
 
-Because the repository is public, so are `REVIEW.md`, `REGRESSIONS.md`, `HUMAN-DECISION.md`, the
-specs and the whole history.
+Because the repository is public, so are the review reports and decisions under `docs/` (`review.md`,
+`regressions.md`, `decisions.md`), the archived early specs and the whole history.
 
 I wrote the policy from this code, not from a template, because a policy must describe *your*
 extension and copying someone else's would assert facts about theirs. Its structure is the common one

@@ -17,7 +17,7 @@ archive's SHA-256 and the steps below. It never commits, tags, pushes or uploads
 
 ## Releasing a version
 
-1. Raise `version` in `chrome-tab-limiter/manifest.json` and commit it. The store
+1. Raise `version` in `extension/manifest.json` and commit it. The store
    rejects a package whose version is not higher than the published one.
 2. Merge to `main`.
 3. Run `tools/release.sh` and read the file list it prints.
@@ -31,8 +31,10 @@ archive's SHA-256 and the steps below. It never commits, tags, pushes or uploads
 Create the item in the dashboard by uploading the same ZIP, then fill in the listing:
 
 - description, category, screenshots and a 128x128 icon;
-- a justification for each permission: `tabs` (reads tab URLs and titles to show and
-  count tabs), `tabGroups` (group limits) and `storage` (saves limits);
+- a justification for each permission: `tabs` (gives the extension tab titles and addresses,
+  which Chrome otherwise leaves out; used to list tabs to choose from and to notice navigation,
+  not to count tabs), `tabGroups` (group limits) and `storage` (saves limits). Start from the
+  justifications in [`store/LISTING.md`](../store/LISTING.md);
 - the privacy practices tab: no user data is collected or sent anywhere;
 - a privacy policy URL, if the dashboard asks for one.
 

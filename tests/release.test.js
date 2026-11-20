@@ -20,14 +20,14 @@ after(() => rmSync(base, { recursive: true, force: true }));
 let counter = 0;
 function repo({ branch = 'main', passingTests = true, tag = null } = {}) {
     const dir = join(base, `r${counter++}`);
-    for (const sub of ['tools', 'tests', 'chrome-tab-limiter']) mkdirSync(join(dir, sub), { recursive: true });
+    for (const sub of ['tools', 'tests', 'extension']) mkdirSync(join(dir, sub), { recursive: true });
     copyFileSync(SCRIPT, join(dir, 'tools/release.sh'));
     chmodSync(join(dir, 'tools/release.sh'), 0o755);
     writeFileSync(join(dir, 'tools/package.sh'),
-        '#!/usr/bin/env bash\nroot="$(cd "$(dirname "$0")/.." && pwd)"\nmkdir -p "$root/dist"\ncp "$root/chrome-tab-limiter/marker.txt" "$root/dist/tab-limiter-1.2.3.zip"\necho packaged\n');
+        '#!/usr/bin/env bash\nroot="$(cd "$(dirname "$0")/.." && pwd)"\nmkdir -p "$root/dist"\ncp "$root/extension/marker.txt" "$root/dist/tab-limiter-1.2.3.zip"\necho packaged\n');
     chmodSync(join(dir, 'tools/package.sh'), 0o755);
-    writeFileSync(join(dir, 'chrome-tab-limiter/manifest.json'), '{"version":"1.2.3"}');
-    writeFileSync(join(dir, 'chrome-tab-limiter/marker.txt'), 'ORIGINAL');
+    writeFileSync(join(dir, 'extension/manifest.json'), '{"version":"1.2.3"}');
+    writeFileSync(join(dir, 'extension/marker.txt'), 'ORIGINAL');
     writeFileSync(join(dir, 'tests/ok.test.js'),
         `import test from 'node:test';\nimport assert from 'node:assert';\nimport { writeFileSync } from 'node:fs';\n` +
         `test('x', () => {\n  if (process.env.EDIT_TARGET) writeFileSync(process.env.EDIT_TARGET, 'EDITED');\n  assert.ok(${passingTests});\n});\n`);
@@ -76,7 +76,7 @@ describe('tools/release.sh', { skip: !OK }, () => {
 
     it('refuses a dirty working tree', () => {
         const { dir } = repo();
-        writeFileSync(join(dir, 'chrome-tab-limiter/manifest.json'), '{"version":"1.2.4"}');
+        writeFileSync(join(dir, 'extension/manifest.json'), '{"version":"1.2.4"}');
         const r = run(dir);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /not clean/);
@@ -110,9 +110,9 @@ describe('tools/release.sh', { skip: !OK }, () => {
     it('packages the recorded commit, not edits made after the tests (P2)', () => {
         const { dir, git } = repo();
         // The test run edits a tracked file in the real working tree, as an editor could
-        const r = run(dir, [], { EDIT_TARGET: join(dir, 'chrome-tab-limiter/marker.txt') });
+        const r = run(dir, [], { EDIT_TARGET: join(dir, 'extension/marker.txt') });
         assert.equal(r.status, 0, r.stderr);
-        assert.equal(readFileSync(join(dir, 'chrome-tab-limiter/marker.txt'), 'utf8'), 'EDITED', 'the edit happened');
+        assert.equal(readFileSync(join(dir, 'extension/marker.txt'), 'utf8'), 'EDITED', 'the edit happened');
         assert.equal(readFileSync(join(dir, 'dist/tab-limiter-1.2.3.zip'), 'utf8'), 'ORIGINAL');
         assert.match(r.stdout, new RegExp(`built from commit ${git('rev-parse', 'HEAD').stdout.trim()}`));
     });

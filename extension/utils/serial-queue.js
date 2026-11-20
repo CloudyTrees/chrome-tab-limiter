@@ -1,4 +1,4 @@
-// One central serial queue (REVIEW.md plan §4). Every event and popup command
+// One central serial queue (docs/review.md plan §4). Every event and popup command
 // runs as a task, one at a time, in the order it was queued.
 //
 // A task that throws rejects only its own promise; the queue always continues.

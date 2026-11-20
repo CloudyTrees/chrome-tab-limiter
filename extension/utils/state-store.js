@@ -1,4 +1,4 @@
-// Enforcement state for Tab Limiter (REVIEW.md plan §3), kept in
+// Enforcement state for Tab Limiter (docs/review.md plan §3), kept in
 // chrome.storage.session under one key. Session storage is in memory only:
 // it survives a service worker restart and is cleared when the browser exits or
 // the extension is reloaded or updated. It holds only tab and window IDs, counts

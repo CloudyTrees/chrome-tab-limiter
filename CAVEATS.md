@@ -71,7 +71,7 @@ waiting for your decision, new tabs beyond the pending limit (default 5) are clo
 ## What has and has not been tested
 
 Tested: 270 automated tests at the time of writing (run them with `npm test`), including the real
-`background.js` run against an in-memory Chrome stand-in, plus checks in a real Chrome 157 on macOS recorded in `REVIEW.md`: startup mode, the
+`background.js` run against an in-memory Chrome stand-in, plus checks in a real Chrome 157 on macOS recorded in `docs/review.md`: startup mode, the
 decision popup, bursts of new tabs, groups and moves, closing windows, the worker being
 suspended, and the content security policy's refusals.
 

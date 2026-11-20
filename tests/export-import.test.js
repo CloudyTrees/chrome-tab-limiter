@@ -7,7 +7,7 @@ import { createChromeMock } from './helpers/chrome-mock.js';
 // export-import.js is a classic script that attaches its API to `window`
 // (loaded by options.html). Evaluate it with a stub window and our chrome mock.
 const SOURCE = readFileSync(
-    new URL('../chrome-tab-limiter/utils/export-import.js', import.meta.url),
+    new URL('../extension/utils/export-import.js', import.meta.url),
     'utf8'
 );
 

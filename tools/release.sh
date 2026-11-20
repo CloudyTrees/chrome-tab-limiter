@@ -28,12 +28,12 @@ snap="$(mktemp -d)"
 trap 'rm -rf "$snap"' EXIT
 git archive --format=tar "$commit" | tar -x -C "$snap"
 
-version="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$snap/chrome-tab-limiter/manifest.json")"
-[ -z "$(git tag -l "v$version")" ] || die "v$version is already tagged; raise \"version\" in chrome-tab-limiter/manifest.json"
+version="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$snap/extension/manifest.json")"
+[ -z "$(git tag -l "v$version")" ] || die "v$version is already tagged; raise \"version\" in extension/manifest.json"
 
 echo "== tests (snapshot of ${commit})"
-if ! (cd "$snap" && node --test tests/ >/dev/null 2>&1); then
-    (cd "$snap" && node --test tests/ 2>&1 | tail -30 >&2) || true
+if ! (cd "$snap" && node --test >/dev/null 2>&1); then
+    (cd "$snap" && node --test 2>&1 | tail -30 >&2) || true
     die "tests fail"
 fi
 echo "tests pass"

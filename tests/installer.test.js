@@ -209,7 +209,7 @@ describe('tools/install.bat (static checks; not run on Windows)', () => {
     });
 
     it('is the version the documentation points to', () => {
-        const docs = readFileSync(new URL('../chrome-tab-limiter/packaging_instructions.md', import.meta.url), 'utf8');
+        const docs = readFileSync(new URL('../docs/packaging.md', import.meta.url), 'utf8');
         assert.ok(docs.includes('tools/install.bat') && docs.includes('tools/install.sh'));
         assert.equal(docs.includes('ZIPFILE'), false, 'the old inline snippet is gone');
     });

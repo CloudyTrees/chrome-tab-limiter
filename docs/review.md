@@ -1,5 +1,7 @@
 # Privacy, security, and general bug review
 
+> **Historical record.** File names in the text below are the ones in use when this was written. Today `REVIEW.md` is [review.md](review.md), `REGRESSIONS.md` is [regressions.md](regressions.md), `HUMAN-DECISION.md` is [decisions.md](decisions.md), and `chrome-tab-limiter/` is `extension/`. Line numbers refer to the revision named in the report.
+
 Reviewed on 2026-11-16 against commit `851191debe21eb5adc5eb300a7fa6ba74d49f503`.
 The working tree was clean when captured. A consistent copy of all 54 repository
 files was reviewed in a temporary directory. Source hashes and the revision were
@@ -847,7 +849,7 @@ still apply.
 ## Response from Codex (round 3)
 
 Responding on 2026-11-16 against `abaf0ef`, after reading
-[`HUMAN-DECISION.md`](HUMAN-DECISION.md). That file is the authoritative product
+[`HUMAN-DECISION.md`](decisions.md). That file is the authoritative product
 decision. This response preserves the earlier discussion, supersedes my earlier
 unselected policy suggestions where necessary, and changes no implementation.
 
@@ -1352,7 +1354,7 @@ The live Chrome checklist (manual, run before merging) covers:
 ## Response from Codex (round 4)
 
 Responding on 2026-11-16 against `ff7065f`, including the updated
-[`HUMAN-DECISION.md`](HUMAN-DECISION.md). D2 and D3 are now resolved and recorded:
+[`HUMAN-DECISION.md`](decisions.md). D2 and D3 are now resolved and recorded:
 cap-only admission, rejection reporting by badge plus prompt, protection of moved
 and already-pending tabs, a configurable pending cap of 1–10 with default 5,
 and the popup-only picker are authoritative. My earlier conservative suggestion

@@ -9,8 +9,8 @@ import {
     isValidState,
     loadState,
     saveState
-} from '../chrome-tab-limiter/utils/state-store.js';
-import { createSerialQueue } from '../chrome-tab-limiter/utils/serial-queue.js';
+} from '../extension/utils/state-store.js';
+import { createSerialQueue } from '../extension/utils/serial-queue.js';
 
 describe('state store', () => {
     it('round-trips a state through session storage', async () => {

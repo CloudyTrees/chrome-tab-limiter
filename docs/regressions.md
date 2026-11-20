@@ -1,5 +1,7 @@
 # Implementation verification: remaining regressions
 
+> **Historical record.** File names in the text below are the ones in use when this was written. Today `REVIEW.md` is [review.md](review.md), `REGRESSIONS.md` is [regressions.md](regressions.md), `HUMAN-DECISION.md` is [decisions.md](decisions.md), and `chrome-tab-limiter/` is `extension/`. Line numbers refer to the revision named in the report.
+
 Reviewed on 2026-11-17 against commit
 `dc326cba1663ce84567c38759d40d432f0f0fe75` on `sh-dev`.
 Source locations below refer to that revision.

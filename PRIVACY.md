@@ -80,9 +80,9 @@ The extension requests no host permissions, injects no scripts into web pages an
 ## Open source
 
 Tab Limiter's complete source code is in this repository, so every statement above can be
-checked: the permissions are in `chrome-tab-limiter/manifest.json`, the network ban is its
-`content_security_policy`, and the code that reads tabs is in `chrome-tab-limiter/background.js`
-and `chrome-tab-limiter/popup.js`. Known limitations of the extension (as opposed to its privacy
+checked: the permissions are in `extension/manifest.json`, the network ban is its
+`content_security_policy`, and the code that reads tabs is in `extension/background.js`
+and `extension/popup.js`. Known limitations of the extension (as opposed to its privacy
 practices) are listed in [CAVEATS.md](CAVEATS.md).
 
 ## Children

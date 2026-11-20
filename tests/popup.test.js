@@ -92,7 +92,7 @@ async function openPopup(chrome, { windowId = 1, groupRows = [], onMessage } = {
     chrome.runtime.connect = () => ({ onMessage: { addListener: (fn) => pushListeners.push(fn) } });
     globalThis.chrome = chrome;
 
-    await import(new URL(`../chrome-tab-limiter/popup.js?popup=${++instance}`, import.meta.url));
+    await import(new URL(`../extension/popup.js?popup=${++instance}`, import.meta.url));
     for (const fn of documentListeners.DOMContentLoaded) await fn();
     await flush();
 
@@ -224,7 +224,7 @@ describe('group limits (B-09)', () => {
 
     it('uses the same 1-100 bound in the markup', async () => {
         const { readFileSync } = await import('node:fs');
-        const source = readFileSync(new URL('../chrome-tab-limiter/popup.js', import.meta.url), 'utf8');
+        const source = readFileSync(new URL('../extension/popup.js', import.meta.url), 'utf8');
         assert.match(source, /min="1" max="100" data-group-id/);
         assert.doesNotMatch(source, /max="50"/);
     });

@@ -10,7 +10,7 @@ import {
     shrinkAllowance,
     keepAllowance,
     keepEligibleIds
-} from '../chrome-tab-limiter/utils/limits.js';
+} from '../extension/utils/limits.js';
 
 // n tabs with IDs start..start+n-1, all in `groupId`
 const tabsIn = (n, groupId = -1, start = 1) =>

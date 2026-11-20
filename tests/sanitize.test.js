@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { escapeHtml, sanitizeTabTitle, isValidFaviconUrl } from '../chrome-tab-limiter/utils/sanitize.js';
+import { escapeHtml, sanitizeTabTitle, isValidFaviconUrl } from '../extension/utils/sanitize.js';
 
 describe('escapeHtml', () => {
     it('escapes all HTML-significant characters', () => {

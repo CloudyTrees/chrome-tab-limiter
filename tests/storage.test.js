@@ -12,7 +12,7 @@ import {
     removeAllGroupData,
     removeWindowData,
     DEFAULT_TAB_LIMIT
-} from '../chrome-tab-limiter/utils/storage.js';
+} from '../extension/utils/storage.js';
 
 let harness;
 

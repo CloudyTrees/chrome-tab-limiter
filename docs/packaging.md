@@ -35,7 +35,7 @@ stops with an error if a script or page refers to a file that is not listed.
 ## Publishing to the Chrome Web Store
 
 Uploading is done by hand in the Developer Dashboard. `tools/release.sh` checks the
-tree, runs the tests and builds the ZIP to upload; see `tools/RELEASING.md`.
+tree, runs the tests and builds the ZIP to upload; see [releasing.md](releasing.md).
 
 ---
 
