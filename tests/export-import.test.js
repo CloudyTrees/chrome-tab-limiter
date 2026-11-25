@@ -20,6 +20,14 @@ function loadExportImport(chrome) {
 let harness;
 let api;
 
+// Storage after a reset or a replacing import: exactly `expected`, plus a new session
+// tag for custom group limits (no limit from before can apply again, plan R6)
+function assertReplacedWith(expected) {
+    const { groupLimitSession: tag, ...rest } = harness.chrome.storage.local._dump();
+    assert.deepEqual(rest, expected);
+    assert.match(tag, /^[A-Za-z0-9-]{8,64}$/, 'a new session tag');
+}
+
 beforeEach(() => {
     harness = createChromeMock();
     api = loadExportImport(harness.chrome);
@@ -68,7 +76,8 @@ describe('exportSettings', () => {
         await harness.chrome.storage.local.set({
             defaultTabLimit: 9,
             tabLimit_1234567: 5,
-            groupLimit_1234567_888: 4,
+            groupOverride_0_888: 4,
+            groupLimit_1234567_ungrouped: 3,
             hasSeenWelcome: true
         });
 
@@ -78,21 +87,54 @@ describe('exportSettings', () => {
         assert.equal(exported.settings.defaultTabLimit, 9);
         assert.equal(json.includes('1234567'), false, 'real window ID leaked');
         assert.equal(json.includes('888'), false, 'real group ID leaked');
+        assert.deepEqual(Object.values(exported.settings.groupLimits).sort(), [3, 4], 'both exported');
         assert.equal(exported.exportDate, 'Privacy Protected');
         assert.equal(json.includes('hasSeenWelcome'), false);
     });
 
+    it("exports the current session's group limits anonymized, and nothing from an earlier session", async () => {
+        await harness.chrome.storage.local.set({
+            defaultTabLimit: 9,
+            groupLimitSession: 'cafe-01',
+            'groupOverride_cafe-01_987654': 4,
+            groupOverride_0_555555: 6
+        });
+
+        const exported = await api.exportSettings();
+        const json = JSON.stringify(exported);
+
+        assert.deepEqual(exported.settings.groupLimits, { groupLimit_group_1: 4 });
+        assert.equal(json.includes('987654'), false, 'real group ID leaked');
+        assert.equal(json.includes('cafe'), false, 'the session tag is never exported');
+        assert.equal(json.includes('555555'), false);
+        assert.equal(exported.metadata.totalGroups, 1);
+        assert.deepEqual(api.validateImportData(exported), { valid: true });
+        assert.equal((await api.getCurrentSettingsSummary()).groupLimits, 1);
+    });
+
+    it('exports only limits that apply: a legacy key left by a failed cleanup is neither exported nor counted (Codex)', async () => {
+        await harness.chrome.storage.local.set({ groupOverride_0_777777: 4, groupLimit_1_777777: 9, groupLimit_1_888888: 5, groupLimit_1_ungrouped: 6 });
+
+        const exported = await api.exportSettings();
+
+        assert.deepEqual(Object.values(exported.settings.groupLimits).sort(), [4, 6], 'the tagged limit and the ungrouped limit');
+        assert.equal(exported.metadata.totalGroups, 2);
+        assert.equal((await api.getCurrentSettingsSummary()).groupLimits, 2);
+    });
+
     it('produces a file that passes import validation', async () => {
-        await harness.chrome.storage.local.set({ defaultTabLimit: 9, tabLimit_1: 5, groupLimit_1_2: 4 });
+        await harness.chrome.storage.local.set({ defaultTabLimit: 9, tabLimit_1: 5, groupOverride_0_2: 4, groupLimit_1_ungrouped: 3 });
         const exported = await api.exportSettings();
         assert.deepEqual(api.validateImportData(exported), { valid: true });
     });
 });
 
 describe('exportSettings alias allocation (B-08)', () => {
+    // The window-keyed group limit that still applies is the ungrouped one (a tab
+    // group's own limit is stored by group ID and has no window)
     const SETTINGS = {
-        groupLimit_10_1: 4,
-        groupLimit_20_2: 5,
+        groupLimit_10_ungrouped: 4,
+        groupLimit_20_ungrouped: 5,
         tabLimit_20: 6,
         tabLimit_30: 7
     };
@@ -197,13 +239,13 @@ describe('replacing settings never loses them on a failed write (S-7)', () => {
     it('a successful import still replaces everything', async () => {
         await seed();
         await api.importSettings(validFile({ defaultTabLimit: 20, maxPendingPerWindow: 3 }));
-        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 20, maxPendingPerWindow: 3 });
+        assertReplacedWith({ defaultTabLimit: 20, maxPendingPerWindow: 3 });
     });
 
     it('a successful reset still leaves only the default limit', async () => {
         await seed();
         await api.resetAllSettings();
-        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 10 });
+        assertReplacedWith({ defaultTabLimit: 10 });
     });
 
     it('merging keeps the settings that are not imported', async () => {
@@ -222,7 +264,7 @@ describe('importSettings', () => {
         const result = await api.importSettings(validFile({ defaultTabLimit: 12 }));
 
         assert.equal(result.success, true);
-        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 12 });
+        assertReplacedWith({ defaultTabLimit: 12 });
     });
 
     it('merge mode keeps other settings and lets imported values win', async () => {
@@ -237,7 +279,7 @@ describe('importSettings', () => {
         const result = await api.importSettings(
             validFile({ windowLimits: { window_1: 5 }, groupLimits: { groupLimit_window_1_group_1: 4 } })
         );
-        assert.deepEqual(harness.chrome.storage.local._dump(), { defaultTabLimit: 12 });
+        assertReplacedWith({ defaultTabLimit: 12 });
         assert.equal(result.privacyNotice.skippedWindowLimits, 1);
         assert.equal(result.privacyNotice.skippedGroupLimits, 1);
     });

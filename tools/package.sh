@@ -15,6 +15,7 @@ files=(
     popup.html popup.css popup.js
     options.html options.css options.js
     utils/export-import.js
+    utils/group-overrides.js
     utils/limits.js
     utils/sanitize.js
     utils/selection.js

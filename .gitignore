@@ -11,3 +11,6 @@ dist/
 
 # Local exports of settings
 tab-limiter-settings*.json
+
+# Raw Chrome event captures from tools/live-checks stay local; compact traces are committed
+tools/live-checks/group-move/results/

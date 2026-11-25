@@ -186,40 +186,62 @@ describe('popup limit input (B-09)', () => {
 });
 
 describe('group limits (B-09)', () => {
-    async function openWithGroup() {
+    // The popup saves a group's limit through the background (setGroupLimit), which
+    // answers with `reply`
+    async function openWithGroup(reply = { success: true }) {
         harness.chrome.tabGroups.query = async () => [{ id: 7, title: 'Work', color: 'blue' }];
         const input = createElement('group-7');
         input.dataset.groupId = '7';
         const button = createElement('save-7');
         button.dataset.groupId = '7';
-        await openPopup(harness.chrome, { groupRows: [{ input, button }] });
-        return { input, button };
+        const popup = await openPopup(harness.chrome, {
+            groupRows: [{ input, button }],
+            onMessage: (request) => (request.action === 'setGroupLimit' ? reply : { success: false })
+        });
+        return { input, button, popup };
     }
 
-    const stored = () => harness.chrome.storage.local._dump().groupLimit_1_7;
+    const saves = (popup) => popup.sent.filter((r) => r.action === 'setGroupLimit');
     const pressEnter = (input) => input._fire('keydown', { key: 'Enter' });
 
-    it('saves 75 by button and by Enter key', async () => {
-        const { input, button } = await openWithGroup();
+    it('saves 75 by button and by Enter key, through the background', async () => {
+        const { input, button, popup } = await openWithGroup();
 
         input.value = '75';
         await input._fire('input');
         assert.equal(button.disabled, false, 'live validation accepts 75');
         await pressEnter(input);
+        await button._fire('click');
 
-        assert.equal(stored(), 75);
+        assert.deepEqual(saves(popup), [
+            { action: 'setGroupLimit', windowId: 1, groupId: 7, limit: 75 },
+            { action: 'setGroupLimit', windowId: 1, groupId: 7, limit: 75 }
+        ]);
+        assert.deepEqual(harness.chrome.storage.local._dump(), {}, 'the popup itself writes nothing');
+        assert.equal(popup.getElement('statusMessage').textContent, 'Group limit saved');
     });
 
     it('rejects values over 100, decimals and negatives, including by Enter key', async () => {
-        const { input, button } = await openWithGroup();
+        const { input, button, popup } = await openWithGroup();
 
         for (const text of ['101', '1.5', '-5', '1e3']) {
             input.value = text;
             await input._fire('input');
             assert.equal(button.disabled, true, `Save stays disabled for ${text}`);
             await pressEnter(input);
-            assert.equal(stored(), undefined, `${text} must not be stored`);
+            assert.deepEqual(saves(popup), [], `${text} must not be sent`);
         }
+    });
+
+    it('shows a failed save and keeps the typed value', async () => {
+        const { input, popup } = await openWithGroup({ success: false, error: 'The limit could not be saved; please try again' });
+
+        input.value = '12';
+        await pressEnter(input);
+
+        assert.equal(popup.getElement('statusMessage').textContent, 'The limit could not be saved; please try again');
+        assert.match(popup.getElement('statusMessage').className, /error/);
+        assert.equal(input.value, '12');
     });
 
     it('uses the same 1-100 bound in the markup', async () => {
@@ -462,21 +484,113 @@ describe('group rows never put stored values into markup', () => {
     }
 
     it('shows a normal stored limit as a number', async () => {
-        const html = await renderWithStoredLimits({ groupLimit_1_7: 12 });
+        const html = await renderWithStoredLimits({ groupOverride_0_7: 12 });
         assert.match(html, /value="12"/);
+    });
+
+    it('shows a group limit stored under the current session tag only', async () => {
+        const render = async (stored) => {
+            await harness.chrome.storage.local.clear();
+            return renderWithStoredLimits({ defaultTabLimit: 9, ...stored });
+        };
+        assert.match(await render({ groupLimitSession: 'b2', groupOverride_b2_7: 6 }), /value="6"/);
+        // An entry from an earlier session, or in the old window-keyed format, never applies
+        assert.match(await render({ groupLimitSession: 'b2', groupOverride_0_7: 6 }), /value="9"/);
+        assert.match(await render({ groupLimit_1_7: 6 }), /value="9"/);
+    });
+
+    it('shows the limit again when a stored limit changes while it is open', async () => {
+        const html = await renderWithStoredLimits({ groupOverride_0_7: 12 });
+        assert.match(html, /value="12"/);
+        await harness.chrome.storage.local.set({ groupOverride_0_7: 4 });
+        await flush();
+        assert.match(globalThis.document.getElementById('groupsList').innerHTML, /value="4"/);
+    });
+
+    it('while a group limit is typed, a change waits until the focus leaves the group rows (Codex)', async () => {
+        await renderWithStoredLimits({ groupOverride_0_7: 12 });
+        const list = () => globalThis.document.getElementById('groupsList');
+        const input = { classList: { contains: (name) => name === 'group-limit-input' } };
+        const saveButton = { classList: { contains: (name) => name === 'group-save-btn' } };
+        globalThis.document.activeElement = input;
+
+        await harness.chrome.storage.local.set({ groupLimitSession: 'b2' }); // a new session: no limit applies
+        await flush();
+        assert.match(list().innerHTML, /value="12"/, 'not re-rendered under the typing');
+
+        await list()._fire('focusout', { relatedTarget: saveButton });
+        await flush();
+        assert.match(list().innerHTML, /value="12"/, 'not while the Save button is being clicked');
+
+        globalThis.document.activeElement = null;
+        await list()._fire('focusout', { relatedTarget: null });
+        await flush();
+        assert.match(list().innerHTML, /value="10"/, 'shown once the focus has left');
+    });
+
+    it('a deferred refresh also waits while the focus is on a Save button (Codex)', async () => {
+        await renderWithStoredLimits({ groupOverride_0_7: 12 });
+        const list = () => globalThis.document.getElementById('groupsList');
+        const input = { classList: { contains: (name) => name === 'group-limit-input' } };
+        const saveButton = { classList: { contains: (name) => name === 'group-save-btn' } };
+        globalThis.document.activeElement = input;
+        await harness.chrome.storage.local.set({ groupLimitSession: 'b2' });
+        await flush();
+
+        // The focus moves to Save, and then another change arrives
+        globalThis.document.activeElement = saveButton;
+        await list()._fire('focusout', { relatedTarget: saveButton });
+        await harness.chrome.storage.local.set({ defaultTabLimit: 8 });
+        await flush();
+        assert.match(list().innerHTML, /value="12"/, 'the row under the click is not redrawn');
+
+        globalThis.document.activeElement = null;
+        await list()._fire('focusout', { relatedTarget: null });
+        await flush();
+        assert.match(list().innerHTML, /value="8"/);
+    });
+
+    it('shows the default as soon as the background says the gate turned on (Codex)', async () => {
+        const { getElement, push } = await openPopup(harness.chrome);
+        harness.chrome.tabGroups.query = async () => [{ id: 7, title: 'Work', color: 'blue' }];
+        harness.chrome.tabs.query = async () => [{ id: 1, windowId: 1, groupId: 7 }];
+        await harness.chrome.storage.local.set({ defaultTabLimit: 9, groupOverride_0_7: 12 });
+        await flush();
+        assert.match(getElement('groupsList').innerHTML, /value="12"/);
+
+        push({ type: 'groupLimits', paused: true });
+        await flush();
+        assert.match(getElement('groupsList').innerHTML, /value="9"/);
+    });
+
+    it('shows the default while the background has custom group limits paused, and the limit once they apply (Codex)', async () => {
+        harness.chrome.tabGroups.query = async () => [{ id: 7, title: 'Work', color: 'blue' }];
+        harness.chrome.tabs.query = async () => [{ id: 1, windowId: 1, groupId: 7 }];
+        await harness.chrome.storage.local.set({ defaultTabLimit: 9, groupOverride_0_7: 12 });
+        const { getElement, push } = await openPopup(harness.chrome, {
+            onMessage: (request) =>
+                request.action === 'getState'
+                    ? { success: true, startupMode: true, groupLimitsPaused: true, startupOperations: 0, operation: null }
+                    : { success: false }
+        });
+        assert.match(getElement('groupsList').innerHTML, /value="9"/, 'paused: the default applies');
+
+        push({ type: 'state', startupMode: true, groupLimitsPaused: false, revisions: {} });
+        await flush();
+        assert.match(getElement('groupsList').innerHTML, /value="12"/);
     });
 
     it('ignores a hostile stored limit and falls back to the default', async () => {
         const hostile = '"><img src=x onerror=alert(1)>';
         for (const value of [hostile, 1.5, -3, 0, 101, null, { a: 1 }, [5]]) {
-            const html = await renderWithStoredLimits({ defaultTabLimit: 9, groupLimit_1_7: value });
+            const html = await renderWithStoredLimits({ defaultTabLimit: 9, groupOverride_0_7: value });
             assert.equal(/<img|onerror/i.test(html), false, JSON.stringify(value));
             assert.match(html, /value="9"/, JSON.stringify(value));
         }
     });
 
     it('escapes the group title', async () => {
-        const html = await renderWithStoredLimits({ groupLimit_1_7: 4 });
+        const html = await renderWithStoredLimits({ groupOverride_0_7: 4 });
         assert.equal(html.includes('<b>'), false);
         assert.ok(html.includes('&lt;b&gt;'));
     });

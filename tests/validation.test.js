@@ -49,11 +49,21 @@ describe('validateMessageRequest', () => {
             { action: 'closeSelected', ...decision, tabIds: [2, 3] },
             { action: 'closePending', ...decision },
             { action: 'keepThese', ...decision },
-            { action: 'startEnforcing' }
+            { action: 'startEnforcing' },
+            { action: 'setGroupLimit', windowId: 1, groupId: 7, limit: 4 }
         ];
         assert.deepEqual(requests.map((r) => r.action), [...VALID_ACTIONS]);
         for (const request of requests) {
             assert.deepEqual(validateMessageRequest(request), { valid: true }, request.action);
+        }
+    });
+
+    it('setGroupLimit takes a group ID (or -1 for ungrouped tabs) and a whole limit from 1 to 100', () => {
+        const ok = (groupId, limit) => validateMessageRequest({ action: 'setGroupLimit', windowId: 1, groupId, limit }).valid;
+        assert.equal(ok(-1, 1), true);
+        assert.equal(ok(123456789, 100), true);
+        for (const [groupId, limit] of [[-2, 5], [1.5, 5], ['7', 5], [7, 0], [7, 101], [7, 2.5], [7, '5'], [undefined, 5], [7, undefined]]) {
+            assert.equal(ok(groupId, limit), false, `${groupId} / ${limit}`);
         }
     });
 

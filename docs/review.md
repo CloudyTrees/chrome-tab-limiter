@@ -409,18 +409,18 @@ I re-ran each behavioral reproduction against the real `background.js` and
 per scenario, injected failures where the finding called for them). I verified
 B-06, B-07, B-09 and the documentation claims by reading the cited code. Results:
 
-| ID | Reproduced? | Observed |
-| --- | --- | --- |
-| P-01 | Yes | With `openPopup` rejecting and the window then closed, session state still held `https://a.example/?token=secret#frag` |
-| B-01 | Yes | `{success:false}`; tabs `[1, 3]`; selector state gone |
-| B-02 | Yes, both | Older prompt's confirmation reopened B's URL; two concurrent confirmations both succeeded, leaving tabs `[1, 1001, 1002]` |
-| B-03 | Yes | `{success:true}`; group-7 tab closed; replacement re-blocked; second prompt opened |
-| B-04 | Yes | 12-tab burst left 5 tabs in a window limited to 3 |
-| B-05 | Yes | No `onAttached`/`onDetached` listener exists |
+| ID   | Reproduced?      | Observed                                                                                                                  |
+| ---- | ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| P-01 | Yes              | With `openPopup` rejecting and the window then closed, session state still held `https://a.example/?token=secret#frag`    |
+| B-01 | Yes              | `{success:false}`; tabs `[1, 3]`; selector state gone                                                                     |
+| B-02 | Yes, both        | Older prompt's confirmation reopened B's URL; two concurrent confirmations both succeeded, leaving tabs `[1, 1001, 1002]` |
+| B-03 | Yes              | `{success:true}`; group-7 tab closed; replacement re-blocked; second prompt opened                                        |
+| B-04 | Yes              | 12-tab burst left 5 tabs in a window limited to 3                                                                         |
+| B-05 | Yes              | No `onAttached`/`onDetached` listener exists                                                                              |
 | B-06 | Yes (by reading) | `safeErrorLog` is declared inside the `DOMContentLoaded` callback (`popup.js:50`) and called from 12 functions outside it |
-| B-07 | Yes (by reading) | `handleTabSelected` in `popup.js` ignores the response, then clears state and closes |
-| B-08 | Yes | Export produced `windowLimits: {"window_2": 7}` while metadata claimed 2 window limits |
-| B-09 | Yes (by reading) | `sanitizeNumericInput` strips non-digits; group input `max="50"` but save uses the 1–100 validator |
+| B-07 | Yes (by reading) | `handleTabSelected` in `popup.js` ignores the response, then clears state and closes                                      |
+| B-08 | Yes              | Export produced `windowLimits: {"window_2": 7}` while metadata claimed 2 window limits                                    |
+| B-09 | Yes (by reading) | `sanitizeNumericInput` strips non-digits; group input `max="50"` but save uses the 1–100 validator                        |
 
 ### Corrections to the record
 
@@ -451,21 +451,21 @@ B-06, B-07, B-09 and the documentation claims by reading the cited code. Results
 
 ### Position on each finding
 
-| ID | Position | Proposed approach |
-| --- | --- | --- |
-| P-01 | **Accept** | Delete the operation on window removal, on prompt failure (after A-01's fallback), and after a TTL (proposal: 10 min). Detect popup dismissal with a `runtime.connect` port: when the popup's port disconnects without a decision, keep the operation only until the TTL. Fix README lines 10, 141 and 150 and `options.html:109` using the review's suggested wording, with the lifetime matched to whatever cleanup is implemented. |
-| A-01 | Proposed | If `openPopup` fails, fall back to opening `selector.html` as a popup window (the code path exists, though nothing calls it today). Only if that also fails, reopen the blocked URL so nothing is lost, accepting one tab over the limit. |
-| B-01 | **Accept** | Create first, then remove: register a per-window *admission token* for the operation, call `tabs.create`, and have `handleTabCreated` admit one tab for a window holding a token. The token is not keyed by tab ID, because `onCreated` can fire before `create` resolves. Remove the chosen tab only after creation succeeds. On failure, keep the operation so the user can retry. |
-| B-02 | **Accept** | Model operations as `{opId, windowId, url, groupId, violation, createdAt}` in session storage, keyed by `opId`. One operation per blocked tab, so a second block no longer overwrites the first. The popup shows the oldest operation for its window and sends `opId` on confirm, cancel and clear. Serialize all operation mutations through one in-worker async lock: a single service-worker instance receives all messages, so a lock is enough, plus check-and-delete under the lock for single use. |
-| B-03 | **Accept** | Record the violated constraint in the operation. For a group violation, the selector lists only tabs in that group. For a window violation, it lists all tabs. Recreate the tab in its original group (`chrome.tabs.group`). The B-01 admission token also prevents an immediate re-block, but only after the correct capacity is freed. |
-| B-04 | **Accept** | Remove the `tabCreation` rate limiter. Process creation events strictly in order per window through a queue. When deciding on tab *k*, count the window's actual tabs minus *k* and minus queued tabs not yet decided. That admits exactly up to the limit, fixing both under-blocking and my over-blocking caveat. Keep prompt-rate limiting only for *presentation*, never for enforcement (fixes A-02). |
-| B-05 | **Accept as a gap; needs a product decision** | Moving a tab does not create one, so this is a policy question more than a defect. Options: (a) allow moves and document it; (b) move the tab back; (c) prompt as for creation. Counts already stay correct, because decisions recount real tabs. I recommend (a) now and (c) later. Owner to decide. |
-| B-06 | **Accept** | Move `debugLog` and `safeErrorLog` to module scope. Add a popup-level test (see below). |
-| B-07 | **Accept** | Check `response?.success`. On rejection, show the error, refresh the list, and keep the operation. Implement with B-02 because both need `opId`. |
-| B-08 | **Accept** | Use one alias allocator backed by `windowIdMap.size` for both key types. Add multi-window, mixed-order export tests. |
-| B-09 | **Accept** | Parse with `Number(value)`, then require `Number.isInteger` and the range. Use one bound in the UI, the save handlers and import. I propose 1–100 for groups too, since import already accepts 100 for any limit. Owner to confirm. |
-| Hardening 1 | **Accept** | Explain the `tabs` permission in the README and listing: it is used to read titles for the selector and URLs to reopen the blocked page. |
-| Hardening 2 | **Accept** | Remove `*.pem` from the backup ZIP in `packaging_instructions.md`; recommend a separate, protected key backup. |
+| ID          | Position                                      | Proposed approach                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P-01        | **Accept**                                    | Delete the operation on window removal, on prompt failure (after A-01's fallback), and after a TTL (proposal: 10 min). Detect popup dismissal with a `runtime.connect` port: when the popup's port disconnects without a decision, keep the operation only until the TTL. Fix README lines 10, 141 and 150 and `options.html:109` using the review's suggested wording, with the lifetime matched to whatever cleanup is implemented.                                                                     |
+| A-01        | Proposed                                      | If `openPopup` fails, fall back to opening `selector.html` as a popup window (the code path exists, though nothing calls it today). Only if that also fails, reopen the blocked URL so nothing is lost, accepting one tab over the limit.                                                                                                                                                                                                                                                                 |
+| B-01        | **Accept**                                    | Create first, then remove: register a per-window *admission token* for the operation, call `tabs.create`, and have `handleTabCreated` admit one tab for a window holding a token. The token is not keyed by tab ID, because `onCreated` can fire before `create` resolves. Remove the chosen tab only after creation succeeds. On failure, keep the operation so the user can retry.                                                                                                                      |
+| B-02        | **Accept**                                    | Model operations as `{opId, windowId, url, groupId, violation, createdAt}` in session storage, keyed by `opId`. One operation per blocked tab, so a second block no longer overwrites the first. The popup shows the oldest operation for its window and sends `opId` on confirm, cancel and clear. Serialize all operation mutations through one in-worker async lock: a single service-worker instance receives all messages, so a lock is enough, plus check-and-delete under the lock for single use. |
+| B-03        | **Accept**                                    | Record the violated constraint in the operation. For a group violation, the selector lists only tabs in that group. For a window violation, it lists all tabs. Recreate the tab in its original group (`chrome.tabs.group`). The B-01 admission token also prevents an immediate re-block, but only after the correct capacity is freed.                                                                                                                                                                  |
+| B-04        | **Accept**                                    | Remove the `tabCreation` rate limiter. Process creation events strictly in order per window through a queue. When deciding on tab *k*, count the window's actual tabs minus *k* and minus queued tabs not yet decided. That admits exactly up to the limit, fixing both under-blocking and my over-blocking caveat. Keep prompt-rate limiting only for *presentation*, never for enforcement (fixes A-02).                                                                                                |
+| B-05        | **Accept as a gap; needs a product decision** | Moving a tab does not create one, so this is a policy question more than a defect. Options: (a) allow moves and document it; (b) move the tab back; (c) prompt as for creation. Counts already stay correct, because decisions recount real tabs. I recommend (a) now and (c) later. Owner to decide.                                                                                                                                                                                                     |
+| B-06        | **Accept**                                    | Move `debugLog` and `safeErrorLog` to module scope. Add a popup-level test (see below).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| B-07        | **Accept**                                    | Check `response?.success`. On rejection, show the error, refresh the list, and keep the operation. Implement with B-02 because both need `opId`.                                                                                                                                                                                                                                                                                                                                                          |
+| B-08        | **Accept**                                    | Use one alias allocator backed by `windowIdMap.size` for both key types. Add multi-window, mixed-order export tests.                                                                                                                                                                                                                                                                                                                                                                                      |
+| B-09        | **Accept**                                    | Parse with `Number(value)`, then require `Number.isInteger` and the range. Use one bound in the UI, the save handlers and import. I propose 1–100 for groups too, since import already accepts 100 for any limit. Owner to confirm.                                                                                                                                                                                                                                                                       |
+| Hardening 1 | **Accept**                                    | Explain the `tabs` permission in the README and listing: it is used to read titles for the selector and URLs to reopen the blocked page.                                                                                                                                                                                                                                                                                                                                                                  |
+| Hardening 2 | **Accept**                                    | Remove `*.pem` from the backup ZIP in `packaging_instructions.md`; recommend a separate, protected key backup.                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Test gaps
 
@@ -523,10 +523,10 @@ combined proposal intends.
 
 I also checked A-01 and A-02 independently:
 
-| ID | Position | Observed in the current implementation |
-| --- | --- | --- |
-| A-01 | Accept the missing automatic recovery; narrow the URL-loss wording | After `openPopup` rejected, the new tab was closed and no fallback window opened, but `getSelectorState` still returned its complete URL. |
-| A-02 | Accept | Four sequential blocked tabs within the prompt-limit interval produced three popup attempts. The fourth tab was closed; storage still held the third URL and contained no fourth URL. |
+| ID   | Position                                                           | Observed in the current implementation                                                                                                                                                |
+| ---- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A-01 | Accept the missing automatic recovery; narrow the URL-loss wording | After `openPopup` rejected, the new tab was closed and no fallback window opened, but `getSelectorState` still returned its complete URL.                                             |
+| A-02 | Accept                                                             | Four sequential blocked tabs within the prompt-limit interval produced three popup attempts. The fourth tab was closed; storage still held the third URL and contained no fourth URL. |
 
 For A-01, the current pending URL is still recoverable through extension state:
 manually opening the action popup can load it through `popup.js:39–42`. There is
@@ -581,11 +581,11 @@ No, deleting the operation before touching tabs does not make a replacement
 recoverable or exactly-once across worker termination. Consider these distinct
 interruption points:
 
-| Interruption point | What a fresh worker can know |
-| --- | --- |
-| Operation deleted, before any tab API call | The requested operation has vanished despite no replacement taking place. |
+| Interruption point                                   | What a fresh worker can know                                                                                               |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Operation deleted, before any tab API call           | The requested operation has vanished despite no replacement taking place.                                                  |
 | Replacement created, before its returned ID is saved | A tab may exist, but an operation record without its identity cannot safely distinguish it from an unrelated same-URL tab. |
-| Original removed, before completion is recorded | Repeating the whole operation can create another replacement; discarding all state can lose recovery information. |
+| Original removed, before completion is recorded      | Repeating the whole operation can create another replacement; discarding all state can lose recovery information.          |
 
 These are failure schedules to design for, not live worker-crash reproductions.
 An in-memory mutex disappears with its worker, and a storage write and a browser
@@ -746,17 +746,17 @@ ever recreated.
 
 How each finding maps under this model:
 
-| ID | Under keep-pending |
-| --- | --- |
-| P-01 | **Gone.** No URL is stored. An operation is `{opId, windowId, pendingTabIds, violation, createdAt}`, and titles are read live from tabs. |
-| A-01 / A-02 | **Gone as loss paths.** If the prompt fails or is rate-limited, the tabs simply stay open. A badge on the toolbar icon makes the pending state discoverable. |
-| B-01 | **Gone.** No creation step. Live page state is preserved because the user's actual tab is kept. |
-| B-02 | **Much smaller.** The operation can be rebuilt from real tabs. Confirming means removing the chosen tabs, then recounting. After a restart, reconciliation recounts real tabs, drops pending IDs that no longer exist, and resolves the operation if the window is within its limits. There is no created-but-unrecorded gap because nothing is created. An in-worker lock plus `opId` checks still serialize concurrent commands. |
-| B-03 | **Simpler.** The new tab keeps the group Chrome put it in. The selector lists only tabs that reduce the violated constraint, and admissibility is checked by recounting before anything closes. |
-| B-04 | **Simpler.** A burst produces one operation with *k* pending tabs instead of *k* recreate operations. The per-window queue and undecided-tab exclusion from round 1 still apply. The rate limiter is removed from enforcement. |
-| B-05 | **Same mechanism.** A move into a full window or group creates the same "over by *k*" operation (policy (c) from round 1) with no extra machinery. The owner can still choose policy (a). |
-| B-07 | Unchanged: check `success` and keep the operation on rejection. |
-| B-06, B-08, B-09 | Unaffected. |
+| ID               | Under keep-pending                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P-01             | **Gone.** No URL is stored. An operation is `{opId, windowId, pendingTabIds, violation, createdAt}`, and titles are read live from tabs.                                                                                                                                                                                                                                                                                           |
+| A-01 / A-02      | **Gone as loss paths.** If the prompt fails or is rate-limited, the tabs simply stay open. A badge on the toolbar icon makes the pending state discoverable.                                                                                                                                                                                                                                                                       |
+| B-01             | **Gone.** No creation step. Live page state is preserved because the user's actual tab is kept.                                                                                                                                                                                                                                                                                                                                    |
+| B-02             | **Much smaller.** The operation can be rebuilt from real tabs. Confirming means removing the chosen tabs, then recounting. After a restart, reconciliation recounts real tabs, drops pending IDs that no longer exist, and resolves the operation if the window is within its limits. There is no created-but-unrecorded gap because nothing is created. An in-worker lock plus `opId` checks still serialize concurrent commands. |
+| B-03             | **Simpler.** The new tab keeps the group Chrome put it in. The selector lists only tabs that reduce the violated constraint, and admissibility is checked by recounting before anything closes.                                                                                                                                                                                                                                    |
+| B-04             | **Simpler.** A burst produces one operation with *k* pending tabs instead of *k* recreate operations. The per-window queue and undecided-tab exclusion from round 1 still apply. The rate limiter is removed from enforcement.                                                                                                                                                                                                     |
+| B-05             | **Same mechanism.** A move into a full window or group creates the same "over by *k*" operation (policy (c) from round 1) with no extra machinery. The owner can still choose policy (a).                                                                                                                                                                                                                                          |
+| B-07             | Unchanged: check `success` and keep the operation on rejection.                                                                                                                                                                                                                                                                                                                                                                    |
+| B-06, B-08, B-09 | Unaffected.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Trade-offs the owner must accept or reject:
 
@@ -855,14 +855,14 @@ unselected policy suggestions where necessary, and changes no implementation.
 
 ### Decisions now settled
 
-| Area | Owner's decision | Consequence for the implementation plan |
-| --- | --- | --- |
-| Enforcement | Keep-pending | Preserve the actual new tabs while the user resolves excess; remove URL recreation from the ordinary flow. |
-| Ignored prompts | Block new tabs in that window until the owner decides | Do not substitute my earlier suggestion to keep admitting tabs and remind later. Define the exact event/state that enables blocking. |
-| Pending allowance | Initially 5 per window, configurable; explicitly reject additional new tabs | Bound admission of new pending tabs, make rejection visible, and resolve its interaction with the blocking rule below. |
-| Movement | Prompt and recalculate constraints; no automatic move-back or closure | A moved tab is not automatically disposable because its destination is full. |
-| Group maximum | 1–100 | Use this bound consistently in UI, save handlers, keyboard submission, and import validation. |
-| Minimum Chrome | 127 | Declare this minimum and continue handling popup-opening failures. |
+| Area              | Owner's decision                                                            | Consequence for the implementation plan                                                                                              |
+| ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Enforcement       | Keep-pending                                                                | Preserve the actual new tabs while the user resolves excess; remove URL recreation from the ordinary flow.                           |
+| Ignored prompts   | Block new tabs in that window until the owner decides                       | Do not substitute my earlier suggestion to keep admitting tabs and remind later. Define the exact event/state that enables blocking. |
+| Pending allowance | Initially 5 per window, configurable; explicitly reject additional new tabs | Bound admission of new pending tabs, make rejection visible, and resolve its interaction with the blocking rule below.               |
+| Movement          | Prompt and recalculate constraints; no automatic move-back or closure       | A moved tab is not automatically disposable because its destination is full.                                                         |
+| Group maximum     | 1–100                                                                       | Use this bound consistently in UI, save handlers, keyboard submission, and import validation.                                        |
+| Minimum Chrome    | 127                                                                         | Declare this minimum and continue handling popup-opening failures.                                                                   |
 
 The enforcement-model decision has been made. It is now appropriate to prepare
 one concrete keep-pending implementation plan for owner approval, rather than
@@ -1246,18 +1246,18 @@ and that removes the A-01 fallback design Codex reviewed.
 
 ### Code layout
 
-| File | Change |
-| --- | --- |
-| `utils/limits.js` (new, pure) | `computeExcess`, `decideAdmission`, `resolvesAll(selection)`, `shrinkAllowance`. Shared by the background and the popup preview, and fully unit-tested. |
-| `utils/state-store.js` (new) | Load and save `tl_state`; schema check. |
-| `utils/serial-queue.js` (new) | The central task queue. |
-| `background.js` | Rewritten around the queue, state store and limits; the event wiring above. The `selectorState` and rate-limiter code is removed. |
-| `popup.js/html/css` | The new selector view and commands; B-06 (logging helpers moved to module scope); B-09 (parse the whole value, `Number.isInteger`, 1–100 for window and group). |
-| `selector.*` | Deleted. |
-| `options.html/js` | "Max pending tabs per window" setting, 1–10, default 5 (`maxPendingPerWindow` in local storage). Corrected privacy text. |
-| `utils/export-import.js` | B-08: one alias allocator. Include `maxPendingPerWindow` in export and import. |
-| `manifest.json` | `"minimum_chrome_version": "127"`. Permissions unchanged. |
-| `README.md`, `packaging_instructions.md` | P-01 text (lines 10, 141 and 150, plus the lifetime of session metadata). Explain the `tabs` permission. Keep `*.pem` out of backup archives. |
+| File                                     | Change                                                                                                                                                          |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `utils/limits.js` (new, pure)            | `computeExcess`, `decideAdmission`, `resolvesAll(selection)`, `shrinkAllowance`. Shared by the background and the popup preview, and fully unit-tested.         |
+| `utils/state-store.js` (new)             | Load and save `tl_state`; schema check.                                                                                                                         |
+| `utils/serial-queue.js` (new)            | The central task queue.                                                                                                                                         |
+| `background.js`                          | Rewritten around the queue, state store and limits; the event wiring above. The `selectorState` and rate-limiter code is removed.                               |
+| `popup.js/html/css`                      | The new selector view and commands; B-06 (logging helpers moved to module scope); B-09 (parse the whole value, `Number.isInteger`, 1–100 for window and group). |
+| `selector.*`                             | Deleted.                                                                                                                                                        |
+| `options.html/js`                        | "Max pending tabs per window" setting, 1–10, default 5 (`maxPendingPerWindow` in local storage). Corrected privacy text.                                        |
+| `utils/export-import.js`                 | B-08: one alias allocator. Include `maxPendingPerWindow` in export and import.                                                                                  |
+| `manifest.json`                          | `"minimum_chrome_version": "127"`. Permissions unchanged.                                                                                                       |
+| `README.md`, `packaging_instructions.md` | P-01 text (lines 10, 141 and 150, plus the lifetime of session metadata). Explain the `tabs` permission. Keep `*.pem` out of backup archives.                   |
 
 ### Tests
 
@@ -1595,17 +1595,17 @@ application code has been changed.
 
 ### 1. Product rules (from `HUMAN-DECISION.md`)
 
-| Rule | Behavior |
-| --- | --- |
-| Enforcement | Keep-pending. New tabs that exceed a limit stay open as **pending** until the user decides. No URL recreation. |
-| Pending cap | Default 5 per window, configurable 1–10 on the options page. While a window has an open operation, new tabs join as pending up to the cap; later ones are **rejected** (closed; URL not kept). Dismissing the popup changes nothing. No timers. Lowering the cap never closes pending tabs. |
-| Rejection notice | Badge, plus the popup reopening with "N new tabs were rejected; decide first", when Chrome allows it. No `notifications` permission. |
-| Movement | A tab moved into a full window or group is **moved**: it counts toward the excess and triggers the prompt, but is never rejected, never closed automatically, and never included in "close the new tabs". No move-back. |
-| Startup (D1) | After a browser start or extension reload or update, **nothing is closed automatically until the user's first decision**. Over-limit tabs are kept, and the popup offers "Keep these" or "Choose tabs to close". |
-| Start enforcing (D4) | While startup mode is on, the popup shows "Start enforcing now" in both the settings view and the operation view. It ends startup mode for every window, and stays ended across worker restarts. It closes no tabs, raises no allowances, and leaves operations and statuses as they are. |
-| Picker (D3) | Popup only. `selector.html/js/css` and their messages are removed. |
-| Group bound | 1–100 everywhere: UI, save handlers, keyboard submission, import. |
-| Minimum Chrome | 127 (`minimum_chrome_version`). |
+| Rule                 | Behavior                                                                                                                                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enforcement          | Keep-pending. New tabs that exceed a limit stay open as **pending** until the user decides. No URL recreation.                                                                                                                                                                              |
+| Pending cap          | Default 5 per window, configurable 1–10 on the options page. While a window has an open operation, new tabs join as pending up to the cap; later ones are **rejected** (closed; URL not kept). Dismissing the popup changes nothing. No timers. Lowering the cap never closes pending tabs. |
+| Rejection notice     | Badge, plus the popup reopening with "N new tabs were rejected; decide first", when Chrome allows it. No `notifications` permission.                                                                                                                                                        |
+| Movement             | A tab moved into a full window or group is **moved**: it counts toward the excess and triggers the prompt, but is never rejected, never closed automatically, and never included in "close the new tabs". No move-back.                                                                     |
+| Startup (D1)         | After a browser start or extension reload or update, **nothing is closed automatically until the user's first decision**. Over-limit tabs are kept, and the popup offers "Keep these" or "Choose tabs to close".                                                                            |
+| Start enforcing (D4) | While startup mode is on, the popup shows "Start enforcing now" in both the settings view and the operation view. It ends startup mode for every window, and stays ended across worker restarts. It closes no tabs, raises no allowances, and leaves operations and statuses as they are.   |
+| Picker (D3)          | Popup only. `selector.html/js/css` and their messages are removed.                                                                                                                                                                                                                          |
+| Group bound          | 1–100 everywhere: UI, save handlers, keyboard submission, import.                                                                                                                                                                                                                           |
+| Minimum Chrome       | 127 (`minimum_chrome_version`).                                                                                                                                                                                                                                                             |
 
 ### 2. Definitions
 
@@ -1838,18 +1838,18 @@ cleanup.
 
 ### 9. Files
 
-| File | Change |
-| --- | --- |
-| `utils/limits.js` (new, pure) | `computeExcess`, `decideCreation` (§5 order), `resolvesAll`, `shrinkAllowance`, `keepAllowance`. Used by the background and the popup preview. |
-| `utils/state-store.js` (new) | Load and save `tl_state` with a schema check. |
-| `utils/serial-queue.js` (new) | The central task queue. |
-| `background.js` | Rewritten around §3–§7. Removes `selectorState`, the rate limiter, the legacy handlers and `openTabSelector`. |
-| `popup.js/html/css` | New operation view and commands. B-06: logging helpers at module scope. B-09: parse the whole value with `Number`, check with `Number.isInteger`, 1–100 for window and group. |
-| `selector.*` | Deleted. |
-| `options.html/js` | Setting "Max pending tabs per window" (1–10, default 5; `maxPendingPerWindow`). Corrected privacy text. |
-| `utils/export-import.js` | B-08: one alias allocator. Export and import `maxPendingPerWindow`. |
-| `utils/validation.js` | Message validation for the new commands, including the parameterless `startEnforcing` (D4); legacy actions removed. |
-| `manifest.json` | `"minimum_chrome_version": "127"`. Permissions unchanged. |
+| File                                     | Change                                                                                                                                                                                         |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `utils/limits.js` (new, pure)            | `computeExcess`, `decideCreation` (§5 order), `resolvesAll`, `shrinkAllowance`, `keepAllowance`. Used by the background and the popup preview.                                                 |
+| `utils/state-store.js` (new)             | Load and save `tl_state` with a schema check.                                                                                                                                                  |
+| `utils/serial-queue.js` (new)            | The central task queue.                                                                                                                                                                        |
+| `background.js`                          | Rewritten around §3–§7. Removes `selectorState`, the rate limiter, the legacy handlers and `openTabSelector`.                                                                                  |
+| `popup.js/html/css`                      | New operation view and commands. B-06: logging helpers at module scope. B-09: parse the whole value with `Number`, check with `Number.isInteger`, 1–100 for window and group.                  |
+| `selector.*`                             | Deleted.                                                                                                                                                                                       |
+| `options.html/js`                        | Setting "Max pending tabs per window" (1–10, default 5; `maxPendingPerWindow`). Corrected privacy text.                                                                                        |
+| `utils/export-import.js`                 | B-08: one alias allocator. Export and import `maxPendingPerWindow`.                                                                                                                            |
+| `utils/validation.js`                    | Message validation for the new commands, including the parameterless `startEnforcing` (D4); legacy actions removed.                                                                            |
+| `manifest.json`                          | `"minimum_chrome_version": "127"`. Permissions unchanged.                                                                                                                                      |
 | `README.md`, `packaging_instructions.md` | Privacy text (README lines 10, 141 and 150; what session metadata holds and for how long), §8 disclosures, an explanation of the `tabs` permission, and `*.pem` excluded from backup archives. |
 
 ### 10. Tests
@@ -2005,12 +2005,12 @@ All four are real contradictions in my specification, and I have accepted them.
 The consolidated plan above is **edited in place**, with each change tagged R1–R4,
 so it remains the single specification. No application code has been changed.
 
-| # | Accepted fix (where in the consolidated plan) |
-| --- | --- |
-| R1 | §5 creation rule 1 now says that **in startup mode nothing is rejected and nothing becomes pending**, and it takes precedence over every later rule. A tab that fits is admitted even if an operation is open; one that doesn't fit becomes `startup`. Test: Codex's group-A/group-B case below and above the cap. |
+| #  | Accepted fix (where in the consolidated plan)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 | §5 creation rule 1 now says that **in startup mode nothing is rejected and nothing becomes pending**, and it takes precedence over every later rule. A tab that fits is admitted even if an operation is open; one that doesn't fit becomes `startup`. Test: Codex's group-A/group-B case below and above the cap.                                                                                                                                                                                                                                                                              |
 | R2 | §2 and §3 add an explicit `startup` status and list, and define **Keep-eligible = not `pending` and not `moved`**. Since over-limit arrivals after startup mode always become `pending` or are rejected, tabs opened after startup mode never qualify. **Correction to my consequence 1:** tabs the user opens *during* startup mode cannot be told apart from restored ones, so they are eligible. That is inherent to D1 and now disclosed in §8. The restart edge case (a pending ID lost before it was saved) is also stated: such a tab is eligible, but only through the explicit action. |
-| R3 | §3: a URL change on **any** tab in a window with an operation bumps the revision. Title-only changes deliberately do not, because many pages update their titles constantly and the selection would be invalidated nonstop. |
-| R4 | §6: a general invariant that **no command closes the last tab in W**. `closePending` is refused when W has no tab outside `pending`, and every removal is checked again just before it happens. Tests cover Codex's limit-1 example and a manual closure at the last moment. |
+| R3 | §3: a URL change on **any** tab in a window with an operation bumps the revision. Title-only changes deliberately do not, because many pages update their titles constantly and the selection would be invalidated nonstop.                                                                                                                                                                                                                                                                                                                                                                     |
+| R4 | §6: a general invariant that **no command closes the last tab in W**. `closePending` is refused when W has no tab outside `pending`, and every removal is checked again just before it happens. Tests cover Codex's limit-1 example and a manual closure at the last moment.                                                                                                                                                                                                                                                                                                                    |
 
 On Codex's consequence notes: consequence 3 stays as a deliberate policy, with
 eligibility bounded per window by the R2 definition. Consequence 2 depends on a
@@ -2094,15 +2094,15 @@ Codex's round-6 opinion** and have folded them into the consolidated plan,
 marked "D4". The owner accepted D4, and it is recorded in `HUMAN-DECISION.md`
 with Codex's suggested wording. No application code has been changed.
 
-| Codex requirement | Where in the consolidated plan |
-| --- | --- |
-| Shown in the settings view and the operation view while startup mode is on | §1 (new D4 row) |
+| Codex requirement                                                                                                 | Where in the consolidated plan                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shown in the settings view and the operation view while startup mode is on                                        | §1 (new D4 row)                                                                                                                                                                                                                                                                                                       |
 | Ends startup mode globally; survives a worker restart; D1 still applies after a browser start or extension reload | §1 and §6. `startupMode` already lives in `tl_state` in `chrome.storage.session`, which survives a worker restart and is cleared by a browser restart or an extension reload or update, so this needs no new storage. The §7 invariant "a worker restart never turns `startupMode` back on" already covered the rest. |
-| Normal cap-only admission for later creations only; no retroactive rejection | §6 `startEnforcing()`: tasks queued before it are still decided in startup mode |
-| Closes nothing, raises no allowance, keeps operations and statuses; "Keep these" eligibility unchanged | §6 `startEnforcing()`; §8 already says a startup operation keeps offering "Keep these" until resolved |
-| Open popups refresh; repeats are harmless | §6: a global `startupMode` push over every port, because the existing refresh is per-window revision only; repeats succeed and change nothing |
-| No `opId`; central queue; sender validation; save before reporting success | §6 now separates the global command from the per-window commands; §9 `validation.js` |
-| Tests | §10 group 4, all of Codex's cases, plus three of mine: a creation queued before the command, an untrusted sender, and the startup-excess window below |
+| Normal cap-only admission for later creations only; no retroactive rejection                                      | §6 `startEnforcing()`: tasks queued before it are still decided in startup mode                                                                                                                                                                                                                                       |
+| Closes nothing, raises no allowance, keeps operations and statuses; "Keep these" eligibility unchanged            | §6 `startEnforcing()`; §8 already says a startup operation keeps offering "Keep these" until resolved                                                                                                                                                                                                                 |
+| Open popups refresh; repeats are harmless                                                                         | §6: a global `startupMode` push over every port, because the existing refresh is per-window revision only; repeats succeed and change nothing                                                                                                                                                                         |
+| No `opId`; central queue; sender validation; save before reporting success                                        | §6 now separates the global command from the per-window commands; §9 `validation.js`                                                                                                                                                                                                                                  |
+| Tests                                                                                                             | §10 group 4, all of Codex's cases, plus three of mine: a creation queued before the command, an untrusted sender, and the startup-excess window below                                                                                                                                                                 |
 
 **One consequence I made explicit (§8).** Codex says existing startup excess
 "remains available for explicit resolution". Under the plan's rule 2 of §5, that
@@ -2125,14 +2125,14 @@ then start.
 Written on 2026-11-16 after the owner locked the plan. One commit per step, tests
 in the same commit, nothing pushed.
 
-| Step | Commit | Result |
-| --- | --- | --- |
-| 1. Independent fixes | `dbf41fb` | B-06, B-08, B-09, `minimum_chrome_version` 127, `*.pem` excluded from backups, `tabs` permission explained. |
-| 2. `utils/limits.js` | `5d149b0` | Pure arithmetic with tests, including R1 and C1. |
-| 3. State store, queue, background rewrite | `87dc1c1` | Test groups 1–4, D4 command, R1–R4. |
-| 4. Popup, options cap, selector removed | `e59de87` | Decision view, B-07, D3, `maxPendingPerWindow`, test group 5. |
-| 5. Privacy text and §8 disclosures | `645a45c` | README and options text match the implementation. |
-| 6. Live Chrome checklist | this commit | Results below. 182 unit tests pass. |
+| Step                                      | Commit      | Result                                                                                                      |
+| ----------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| 1. Independent fixes                      | `dbf41fb`   | B-06, B-08, B-09, `minimum_chrome_version` 127, `*.pem` excluded from backups, `tabs` permission explained. |
+| 2. `utils/limits.js`                      | `5d149b0`   | Pure arithmetic with tests, including R1 and C1.                                                            |
+| 3. State store, queue, background rewrite | `87dc1c1`   | Test groups 1–4, D4 command, R1–R4.                                                                         |
+| 4. Popup, options cap, selector removed   | `e59de87`   | Decision view, B-07, D3, `maxPendingPerWindow`, test group 5.                                               |
+| 5. Privacy text and §8 disclosures        | `645a45c`   | README and options text match the implementation.                                                           |
+| 6. Live Chrome checklist                  | this commit | Results below. 182 unit tests pass.                                                                         |
 
 ### Deviations from the plan, for the owner
 
@@ -2163,18 +2163,18 @@ page (an extension page, so `chrome.tabs`, `chrome.runtime.sendMessage` and
 worker. Everything ran headless except the popup check, which needs a real window.
 The scripts are in the session scratchpad and were not added to the repository.
 
-| Checklist item | Result |
-| --- | --- |
-| Event ordering | Pass at every checkpoint. After each batch of creates, moves, group changes and commands, the tab counts and the pending, moved and rejected numbers matched what the events should produce, and the revision only ever increased. Not checked: the exact order in which Chrome delivered each event. |
-| Startup mode | Pass. 5 tabs opened in a window over its limit (3): all 6 kept, operation kind `startup`, badge `3`. |
-| Start enforcing now (D4), then the cap | Pass. After the command, 6 more tabs gave 5 pending and 1 rejected (11 tabs), and startup mode stayed off. |
-| Burst | Pass. 12 tabs created at once in a window with 1 tab (limit 3): 8 tabs stay open, 5 pending, 5 rejected. This is the ideal result and exactly the case that exposed deviation 1. |
-| Dragging between windows and groups | Pass, with `chrome.tabs.move` and `chrome.tabs.group`, which fire the same `onDetached`, `onAttached` and `onUpdated` events as a drag (a real mouse drag was not performed). A tab moved into a full window stayed open as `moved` and was not rejected (rejected count unchanged). A pending tab moved to a window with room resolved. A tab added to a full group became `moved`. |
-| Commands | Pass. `closePending` closed only the pending tabs. Replaying the same command was refused with "The tabs changed; please review again". |
-| Worker suspension | Pass. With nothing attached, Chrome terminated the worker after 30 s. A new tab then woke it, the same operation ID was still there (revision 25 → 27), the tab joined as pending, and startup mode stayed off. |
-| Browser start with an over-limit session | Pass, emulated. 7 tabs were open before the extension loaded and 5 more appeared while it was initializing: all 12 kept, one startup operation with 12 startup tabs, badge `9`, nothing rejected. After a worker idle-out and wake-up, startup mode was still on. "Keep these" then set the window and ungrouped allowances to 12, ended startup mode and cleared the operation. |
-| Extension reload with an operation open | Pass, emulated. Loading the same folder again created a fresh state: startup mode on, three windows (11, 5 and 4 tabs) each with a startup operation, and no tab closed. |
-| Popup opening automatically | Pass in a real window; fails headless. In headed Chrome a tab going over the limit opened `popup.html` on its own, and the popup showed the decision view with "Window: 1 over (limit 2)" and the 3 tabs. In headless Chrome `chrome.action.openPopup` rejects with "Failed to open popup.", which is the case the badge covers. |
+| Checklist item                           | Result                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Event ordering                           | Pass at every checkpoint. After each batch of creates, moves, group changes and commands, the tab counts and the pending, moved and rejected numbers matched what the events should produce, and the revision only ever increased. Not checked: the exact order in which Chrome delivered each event.                                                                                |
+| Startup mode                             | Pass. 5 tabs opened in a window over its limit (3): all 6 kept, operation kind `startup`, badge `3`.                                                                                                                                                                                                                                                                                 |
+| Start enforcing now (D4), then the cap   | Pass. After the command, 6 more tabs gave 5 pending and 1 rejected (11 tabs), and startup mode stayed off.                                                                                                                                                                                                                                                                           |
+| Burst                                    | Pass. 12 tabs created at once in a window with 1 tab (limit 3): 8 tabs stay open, 5 pending, 5 rejected. This is the ideal result and exactly the case that exposed deviation 1.                                                                                                                                                                                                     |
+| Dragging between windows and groups      | Pass, with `chrome.tabs.move` and `chrome.tabs.group`, which fire the same `onDetached`, `onAttached` and `onUpdated` events as a drag (a real mouse drag was not performed). A tab moved into a full window stayed open as `moved` and was not rejected (rejected count unchanged). A pending tab moved to a window with room resolved. A tab added to a full group became `moved`. |
+| Commands                                 | Pass. `closePending` closed only the pending tabs. Replaying the same command was refused with "The tabs changed; please review again".                                                                                                                                                                                                                                              |
+| Worker suspension                        | Pass. With nothing attached, Chrome terminated the worker after 30 s. A new tab then woke it, the same operation ID was still there (revision 25 → 27), the tab joined as pending, and startup mode stayed off.                                                                                                                                                                      |
+| Browser start with an over-limit session | Pass, emulated. 7 tabs were open before the extension loaded and 5 more appeared while it was initializing: all 12 kept, one startup operation with 12 startup tabs, badge `9`, nothing rejected. After a worker idle-out and wake-up, startup mode was still on. "Keep these" then set the window and ungrouped allowances to 12, ended startup mode and cleared the operation.     |
+| Extension reload with an operation open  | Pass, emulated. Loading the same folder again created a fresh state: startup mode on, three windows (11, 5 and 4 tabs) each with a startup operation, and no tab closed.                                                                                                                                                                                                             |
+| Popup opening automatically              | Pass in a real window; fails headless. In headed Chrome a tab going over the limit opened `popup.html` on its own, and the popup showed the decision view with "Window: 1 over (limit 2)" and the 3 tabs. In headless Chrome `chrome.action.openPopup` rejects with "Failed to open popup.", which is the case the badge covers.                                                     |
 
 **Not tested exactly as a person would:**
 - a real mouse drag, and the real "Reload" button on `chrome://extensions` (`runtime.reload()` left a CDP-loaded extension disabled, so a second `loadUnpacked` of the same folder stood in for it);
@@ -2234,14 +2234,14 @@ and two informational notes remain.
 
 ### Findings
 
-| # | Severity | Finding | Suggested change |
-| --- | --- | --- | --- |
-| S-2 | Low (least privilege) | The `windows` permission is unnecessary. A scratch copy without it, loaded in Chrome 157, still ran `windows.getAll`, `windows.create`, `windows.onRemoved` and read tab titles. The README lists it as if it were required. | Remove it from the manifest and from the README's permission list. |
-| S-3 | Low (data minimisation) | `getState` sends each tab's `favIconUrl` to the popup, which never uses it. It is a URL, sent only to our own page. | Stop sending it (`background.js`, `cmdGetState`). |
-| S-4 | Low (CSP) | The CSP sets only `script-src`, `object-src`, `img-src` and `connect-src`. There is no `base-uri`, `form-action` or `frame-src`, and `img-src` allows `data:` although no `data:` image is used. Not exploitable today, since nothing injects markup. | Drop `data:` from `img-src` and add `base-uri 'none'; form-action 'none'; frame-src 'none'`. A full `default-src` first needs the inline `style=` attributes in the HTML moved to classes. |
-| S-5 | Low (consistency) | `generateExportFilename()` embeds the date and time, while the file's content deliberately omits the date ("Privacy Protected"). The file system records the time anyway, so this is a consistency issue, not a leak. | Use a fixed name such as `tab-limiter-settings.json`. |
-| S-6 | Informational | `createGroupItemHTML` puts the stored group limit into a `value="…"` attribute unescaped. It is always an integer written by our own validated code. | Wrap it in `Number()` to make that explicit. |
-| S-7 | Informational (robustness) | Import clears `storage.local` and then writes. If the write failed, the settings would be lost. | Write first and then remove the stale keys, or keep a copy to restore on failure. |
+| #   | Severity                   | Finding                                                                                                                                                                                                                                               | Suggested change                                                                                                                                                                           |
+| --- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S-2 | Low (least privilege)      | The `windows` permission is unnecessary. A scratch copy without it, loaded in Chrome 157, still ran `windows.getAll`, `windows.create`, `windows.onRemoved` and read tab titles. The README lists it as if it were required.                          | Remove it from the manifest and from the README's permission list.                                                                                                                         |
+| S-3 | Low (data minimisation)    | `getState` sends each tab's `favIconUrl` to the popup, which never uses it. It is a URL, sent only to our own page.                                                                                                                                   | Stop sending it (`background.js`, `cmdGetState`).                                                                                                                                          |
+| S-4 | Low (CSP)                  | The CSP sets only `script-src`, `object-src`, `img-src` and `connect-src`. There is no `base-uri`, `form-action` or `frame-src`, and `img-src` allows `data:` although no `data:` image is used. Not exploitable today, since nothing injects markup. | Drop `data:` from `img-src` and add `base-uri 'none'; form-action 'none'; frame-src 'none'`. A full `default-src` first needs the inline `style=` attributes in the HTML moved to classes. |
+| S-5 | Low (consistency)          | `generateExportFilename()` embeds the date and time, while the file's content deliberately omits the date ("Privacy Protected"). The file system records the time anyway, so this is a consistency issue, not a leak.                                 | Use a fixed name such as `tab-limiter-settings.json`.                                                                                                                                      |
+| S-6 | Informational              | `createGroupItemHTML` puts the stored group limit into a `value="…"` attribute unescaped. It is always an integer written by our own validated code.                                                                                                  | Wrap it in `Number()` to make that explicit.                                                                                                                                               |
+| S-7 | Informational (robustness) | Import clears `storage.local` and then writes. If the write failed, the settings would be lost.                                                                                                                                                       | Write first and then remove the stale keys, or keep a copy to restore on failure.                                                                                                          |
 
 Housekeeping, not security: `.meta/`, `specs/`, `progress/` and `tools/` still
 describe the removed selector. They are not shipped. `icons/converter.html` and the
@@ -2275,10 +2275,10 @@ independently repeat it.
 
 ### Additional observations
 
-| # | Severity | Finding | Suggested change |
-| --- | --- | --- | --- |
-| S-8 | Informational (packaging) | Removing the stray swap file resolves S-1's immediate artifact, but the documented ZIP and complete-package recipes still recursively include the working extension folder. Only the dedicated backup recipe excludes PEM files, and it does not exclude editor recovery files. An unrelated local artifact could therefore be included in a later shared archive. No signing key, shared archive or actual sensitive-file disclosure was established. | Package a clean staging directory with an explicit list of required runtime files and icons. Exclude editor recovery files, keys, backups and exports from every distribution path, and inspect the archive before sharing. |
-| S-9 | Informational (export disclosure) | Beyond the filename issue in S-5, the JSON retains aliased window/group relationships, counts of configured rules and the extension version. `options.html` says "Only limit values are preserved", which understates those contents. Raw IDs, browsing URLs and titles are absent from normal exports, and the file is downloaded only at the user's request. | Describe the retained metadata accurately. If those details are unnecessary for the intended backup, omit them. Aliases remove raw identifiers but do not remove relationships. |
+| #   | Severity                          | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                | Suggested change                                                                                                                                                                                                            |
+| --- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S-8 | Informational (packaging)         | Removing the stray swap file resolves S-1's immediate artifact, but the documented ZIP and complete-package recipes still recursively include the working extension folder. Only the dedicated backup recipe excludes PEM files, and it does not exclude editor recovery files. An unrelated local artifact could therefore be included in a later shared archive. No signing key, shared archive or actual sensitive-file disclosure was established. | Package a clean staging directory with an explicit list of required runtime files and icons. Exclude editor recovery files, keys, backups and exports from every distribution path, and inspect the archive before sharing. |
+| S-9 | Informational (export disclosure) | Beyond the filename issue in S-5, the JSON retains aliased window/group relationships, counts of configured rules and the extension version. `options.html` says "Only limit values are preserved", which understates those contents. Raw IDs, browsing URLs and titles are absent from normal exports, and the file is downloaded only at the user's request.                                                                                         | Describe the retained metadata accurately. If those details are unnecessary for the intended backup, omit them. Aliases remove raw identifiers but do not remove relationships.                                             |
 
 **Source evidence:** S-8: `chrome-tab-limiter/packaging_instructions.md:13`
 (recursive ZIP), `187` (PEM-only backup exclusions), `202–208` (recursive copy
@@ -2344,16 +2344,16 @@ qualifications to my verdict.
 
 ### What changed
 
-| # | Change |
-| --- | --- |
-| S-2 | The `windows` permission is removed from the manifest. The README lists three permissions and says window handling needs none. |
-| S-3 | `getState` no longer sends `favIconUrl`. Each tab entry is now `id`, `title`, `groupId`, `status`, `reduces`. |
-| S-4 | CSP is now `script-src 'self'; object-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'`. `data:` is gone from `img-src`. I did not add `default-src`: the HTML still has inline `style=` attributes, so that stays a separate refactor. |
-| S-5 | The export file name is fixed (`tab-limiter-settings.json`), with no date or time. |
-| S-6 | Group rows coerce the group ID, count and limit to numbers, escape the color, and show a stored limit only if it is an integer from 1 to 100 (otherwise the default). |
-| S-7 | Import (replace) and reset write the new settings first and remove the stale keys afterwards, so a failed write loses nothing. Merge import is unchanged. |
+| #   | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S-2 | The `windows` permission is removed from the manifest. The README lists three permissions and says window handling needs none.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| S-3 | `getState` no longer sends `favIconUrl`. Each tab entry is now `id`, `title`, `groupId`, `status`, `reduces`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| S-4 | CSP is now `script-src 'self'; object-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'`. `data:` is gone from `img-src`. I did not add `default-src`: the HTML still has inline `style=` attributes, so that stays a separate refactor.                                                                                                                                                                                                                                                                                                           |
+| S-5 | The export file name is fixed (`tab-limiter-settings.json`), with no date or time.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| S-6 | Group rows coerce the group ID, count and limit to numbers, escape the color, and show a stored limit only if it is an integer from 1 to 100 (otherwise the default).                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| S-7 | Import (replace) and reset write the new settings first and remove the stale keys afterwards, so a failed write loses nothing. Merge import is unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | S-8 | `tools/package.sh` builds the ZIP from an explicit list of runtime files in a clean temporary folder. It checks that every file the scripts and pages refer to is in the list, refuses to finish if the archive holds a dotfile, editor recovery file, key or `.crx`, and prints the contents. `packaging_instructions.md` is rewritten around it: the CRX recipe packs the extracted ZIP, the install scripts use the ZIP, and the backup and distribution recipes name what never goes in. A `.gitignore` excludes `*.swp`, `*.swo`, `*~`, `.DS_Store`, `*.pem`, `*.crx`, `dist/` and local exports. |
-| S-9 | `options.html` and the README now state what an export holds: limits, a count of them, the extension version, and numbered `window_1` / `group_1` labels that show which group limits share a window, and that real IDs, titles, URLs and dates are never included. **Decision for you:** I described these fields instead of removing them. Import restores only the default limit and the pending limit, so the aliased window and group limits cannot be restored from an export. They are a record rather than a backup, and I can drop them from the export if you prefer. |
+| S-9 | `options.html` and the README now state what an export holds: limits, a count of them, the extension version, and numbered `window_1` / `group_1` labels that show which group limits share a window, and that real IDs, titles, URLs and dates are never included. **Decision for you:** I described these fields instead of removing them. Import restores only the default limit and the pending limit, so the aliased window and group limits cannot be restored from an export. They are a record rather than a backup, and I can drop them from the export if you prefer.                        |
 
 ### Verification
 
@@ -2541,15 +2541,15 @@ The snippets are gone from the document. The installers are now files, so they c
 be tested: `tools/install.sh` and `tools/install.bat`, and
 `packaging_instructions.md` describes and points to them.
 
-| Property | `install.sh` | `install.bat` |
-| --- | --- | --- |
-| Extract into a fresh staging folder, never into the install folder | yes | yes (`tab-limiter-extension.new`) |
-| Check the manifest, background script and both pages before replacing anything | yes | yes |
-| Replace the old installation only after the new one is complete, and restore it if the swap fails | yes | yes |
-| On any failure: old install untouched, no success message, no browser launch, nonzero exit | yes | yes (by inspection) |
-| Archive name handled as data | quoted everywhere, passed after `--` | stored only with `set "TL_ZIP=…"`, read by PowerShell as `$env:TL_ZIP` with `-LiteralPath`; never written out as `%TL_ZIP%` |
-| More than one ZIP, or none | refuses | refuses |
-| Symbolic links in the archive | refuses | not checked |
+| Property                                                                                          | `install.sh`                         | `install.bat`                                                                                                               |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Extract into a fresh staging folder, never into the install folder                                | yes                                  | yes (`tab-limiter-extension.new`)                                                                                           |
+| Check the manifest, background script and both pages before replacing anything                    | yes                                  | yes                                                                                                                         |
+| Replace the old installation only after the new one is complete, and restore it if the swap fails | yes                                  | yes                                                                                                                         |
+| On any failure: old install untouched, no success message, no browser launch, nonzero exit        | yes                                  | yes (by inspection)                                                                                                         |
+| Archive name handled as data                                                                      | quoted everywhere, passed after `--` | stored only with `set "TL_ZIP=…"`, read by PowerShell as `$env:TL_ZIP` with `-LiteralPath`; never written out as `%TL_ZIP%` |
+| More than one ZIP, or none                                                                        | refuses                              | refuses                                                                                                                     |
+| Symbolic links in the archive                                                                     | refuses                              | not checked                                                                                                                 |
 
 Two decisions to flag. The script uses its own folder, not the caller's current
 directory. And the Windows file has CRLF line endings, pinned with
@@ -2593,3 +2593,198 @@ directory. And the Windows file has CRLF line endings, pinned with
   the manifest's contents.
 
 Not pushed. Committed as one commit.
+
+---
+
+## Group moves between windows: Chrome event record (Claude, 2026-11-24)
+
+Phase A of the plan for `fix/preserve-group-limits-on-window-move`: a record of what Chrome actually reports when a tab group moves between windows. The aim is to settle which IDs and events exist **before** a storage or migration design is chosen. Nothing in the extension changed.
+
+### Method
+
+- **Browser and profile:** Chrome 158.0.8127.37 (stable, macOS), with throwaway profiles in the session scratchpad, never the owner's.
+- **Recorder:** a dev-only extension, loaded with `Extensions.loadUnpacked` over `--remote-debugging-pipe`. It is kept in `tools/live-checks/group-move/` with its driver and analyser; see its `README.md`.
+- **Evidence kept:** compact traces of scenarios 1–6 (including the drags 4a–4d) are committed in `traces/`. Each holds every event and marker of the run, verbatim, with the driver's setup. It drops the per-event query snapshots except the one taken at each worker start. The raw logs, with snapshots, and those of scenario 7 and the failed first manual run, are kept locally by the author and are not committed.
+- **What it logs** for every `tabs.*`, `tabGroups.*` and `windows.onCreated/onRemoved` event:
+  - the IDs
+  - `performance.now()`, taken synchronously in the listener
+  - the worker instance and `performance.timeOrigin`, so times compare across worker restarts
+  - a snapshot of `tabGroups.query({})` and `tabs.query({})`, with the issue and resolve time of each query
+- **Never logged:** URLs and titles. Every results file was checked for them.
+- **Who did what:**
+  - Scenarios 1–3 and 5–7 were scripted on 2026-11-19.
+  - Scenario 4 was performed by the owner with the mouse on 2026-11-24.
+
+**How to read the snapshots.** A snapshot is an observation made after the event, not the state at the event, because Chrome keeps changing while a query is in flight. For example, a destination group returned by a query triggered by `windows.onRemoved` existed when that query resolved; it may have appeared while the query was in flight. Below, an order is claimed only where the event sequence itself shows it. The snapshots are supporting evidence only.
+
+### Facts
+
+The two event orders the table refers to:
+
+- **A (API move):**
+  1. `tabGroups.onRemoved` (source)
+  2. for each tab, last to first: `tabs.onUpdated(groupId: -1)` while still in the source, then `tabs.onDetached`
+  3. for each tab: `tabs.onAttached`, then `tabs.onUpdated(groupId: G)`
+  4. `tabGroups.onCreated` (destination), then `tabGroups.onUpdated`
+- **B (one drag hop):** the same tab events as A, between `tabGroups.onRemoved` (source) and the destination's group events. When the destination is an **existing** window (4a's second hop, 4c), one `tabGroups.onUpdated` (destination) arrives **before** `tabGroups.onCreated`. When it is the new drag window, `onCreated` comes first.
+
+The drag scenarios also showed `tabGroups.onUpdated` events in the source as the header was grabbed, and again about 0.5–1.5 s after the drop.
+
+| Scenario | How the group moved                                       | Group ID                 | Tab IDs | Event order                                                                                                                                                                       | Source window |
+| -------- | --------------------------------------------------------- | ------------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| 1        | API `tabGroups.move` to an existing window                | kept                     | kept    | A (12 ms end to end)                                                                                                                                                              | stays         |
+| 2        | API: `windows.create`, then `tabGroups.move` into it      | kept                     | kept    | new window's events, then A                                                                                                                                                       | stays         |
+| 3        | API: a window's only group                                | kept                     | kept    | A, then source `windows.onRemoved` 7 ms after the destination `tabGroups.onCreated`                                                                                               | closes        |
+| 4a       | Drag by header into an existing window                    | kept                     | kept    | B into a temporary drag window, about 505 ms there, then B again into the target; the drag window's `windows.onRemoved` comes 16 ms later                                         | stays         |
+| 4b       | Drag by header, torn off into a new window                | kept                     | kept    | `windows.onCreated` (the new window), then B once                                                                                                                                 | stays         |
+| 4c       | Drag by header: a window's only group into another window | kept                     | kept    | B once, straight into the target (the source window serves as the drag window); source `windows.onRemoved` 20 ms after the destination `tabGroups.onCreated`                      | closes        |
+| 4d       | Drag a subset (2 of 4 tabs) by a tab                      | kept by the source group | kept    | each dragged tab gets `groupId -1` in the source, then detaches, attaches to a drag window ungrouped for about 1.2 s, then to the target, still ungrouped; no `tabGroups.*` event | stays         |
+| 5        | API move, plus tabs created in the destination around it  | kept                     | kept    | A; the tab requested during the move was created after the destination `tabGroups.onCreated`                                                                                      | stays         |
+| 6        | API move with the recorder's worker stopped               | kept                     | kept    | a new worker instance starts, then the full A sequence; all logged                                                                                                                | stays         |
+| 7        | 8 groups created and ungrouped in one session             | all distinct             | n/a     | IDs look like 31-bit hashes; window and tab IDs are large and sequential                                                                                                          | n/a           |
+| 7r       | Browser restart with session restore                      | new ID                   | new IDs | the restored group, window and tabs all have new IDs                                                                                                                              | n/a           |
+
+### Findings that bear on Phase B
+
+1. **The group ID survives every whole-group move observed:** five scripted API moves (scenarios 1–3, 5 and 6) and three tab-strip drags (4a–4c). Recognizing an intact move by group ID, within the browser session, works on every observed path. The member-tab-ID fallback isn't needed for them.
+2. **IDs are session-scoped in practice too.** After a restart with session restore, the same group came back with a new group ID, and its window and tabs had new IDs. An override stored under an old ID simply never matches again. No collision was seen, but one run can't show that collisions are impossible. This supports the session-scoping requirement and does not relax it.
+3. **A drag into an existing window passes through a real, temporary window.** In 4a the whole group, with the same ID, lived in a new drag window for about 505 ms. The snapshots in that period show it there. It then moved again, and the drag window closed.
+   - Phase B will see a full move into a window that disappears almost at once. The extension's attach handling would evaluate that window.
+   - `handleWindowRemoved` for the drag window must not lose the override (R1).
+   - Any design that re-keys the override by window would re-key it twice per drag.
+4. **Mid-move states are visible in events.** Tabs report `groupId: -1` while still in the source, and report the group in the destination before the destination's `tabGroups.onCreated`.
+   - In the API path, every snapshot already showed the finished move. The whole sequence took about 12 ms, so these intermediate states were never observed in a query.
+   - R2's tab-based resolution sees the group wherever its tabs are reported; it doesn't need `tabGroups.onCreated`.
+5. **In every observed case, the closing source window was reported after the group's creation in the destination.** That was 7 ms later in scenario 3 and 20 ms in 4c; the drag windows closed 16 and 19 ms after the last attach. The reverse order was never seen. R1 still must not rely on this, because it is an observation, not a documented guarantee.
+6. **A subset dragged by a tab leaves the group.** The tabs become ungrouped in the source, then travel ungrouped. The source group keeps its ID and its remaining tabs, and no `tabGroups.*` event fires. So a split is ordinary regrouping, and "the override stays with the group" happens without any extra rule.
+7. **In scenario 5, a tab requested during the move was created after it.** A `tabs.create` issued while `tabGroups.move` was in flight was carried out after the whole move. That is one run of one ordering; it doesn't show that Chrome never interleaves the two, and no run created a tab in the middle of a move.
+   - The admission race (R2a: a group arriving while an admission task is in progress) was therefore not observed live. It is a queue-level interleaving, and Phase B's mock tests have to cover it.
+8. **A worker stopped before a move was started by the move, and logged every event of it.** In scenario 6 (stopped through `ServiceWorker.stopWorker`) and before 4d (the worker had idled out), the first event of the move started a new worker instance. Its start-up ran before the first event was delivered, and every event of the move was logged in order.
+   - Both runs stopped the worker *before* the move. A worker stopped or restarted in the middle of a move was not tested, so restart recovery mid-move (R4, R5) rests on Phase B's mock tests.
+
+### Side observations (outside this fix)
+
+- **Collapsing a window's only group makes Chrome open a new tab.** The owner collapsed group 4c by accident in a window holding nothing else. Chrome created a new ungrouped tab in that window (`tabs.onCreated`), which the owner then closed. The 4c drag followed after the group was expanded again.
+  - Tab Limiter would treat that tab as a new tab. If the window were over its limit, the tab would become pending, or be rejected past the cap.
+  - This is recorded here for a separate decision; it isn't part of this fix.
+- **Problem with the test setup:** the first manual run recorded nothing. The CDP-loaded recorder sat idle for several days, and Chrome dropped its service-worker registration while the extension still showed as enabled (`getRegistrations()` returned `[]`). The owner's drags in that run were therefore not captured; that log is kept locally only. They were repeated on a fresh profile after a probe confirmed the recorder was logging.
+  - This concerns a development-loaded recorder, and is not known to affect an installed extension.
+
+### Not covered
+
+- Windows, Linux, other Chromium browsers, Incognito, and Chrome 127 (the declared minimum).
+- A drag of a group that is collapsed during the drag. 4c was collapsed earlier, then expanded before it was dragged.
+- Saved or shared tab groups, drags between profiles, and moves into non-normal windows.
+- A worker terminated in the middle of a move at real timing. Only a worker stopped before a move was covered (scenario 6, and before 4d).
+- A tab created in the middle of a move. Scenario 5's tab was created after the move.
+
+The owner and Codex reviewed this record. The Phase B design that followed from it depends on the extension lifecycle, which is recorded next.
+
+## Extension lifecycle: Chrome event record (Claude, 2026-11-24)
+
+Phase B's session tag and startup gate rest on three Chrome behaviors that nobody had checked. At the owner's request they were checked before any Phase B code was written:
+
+- `storage.session` is cleared on an extension reload
+- `runtime.onStartup` fires at a browser start, but not on a reload or on disable and re-enable
+- when `onStartup` arrives relative to the restored tabs' events
+
+### Method
+
+- **Browser and profiles:** Chrome 158.0.8127.37 (stable, macOS), with fresh throwaway profiles in the session scratchpad.
+- **Recorder:** the Phase A recorder now also logs `runtime.onStartup` and `runtime.onInstalled` (with its reason). At each worker start it reports whether a marker it wrote to `storage.session` is still there.
+- **Driver:** `run.mjs` gained reload, disable, enable and state routes, and a restart that keeps the installed recorder instead of loading it again. Each action is logged as a marker on the same clock as the events.
+- **A limit of the harness, found on the way:** an extension loaded with CDP `Extensions.loadUnpacked` doesn't behave like an installed one.
+  - It is **removed at a browser restart**. It is still in the profile's `Secure Preferences` after the quit, but after the relaunch `chrome.management.get` reports "Failed to find extension", and loading it again is a fresh install.
+  - A **reload leaves it disabled** (`disabledReason: unknown`), whether the reload is `chrome.runtime.reload()` or the Reload button's `developerPrivate.reload`. Enabling it then completes the reload.
+  - Scripted workarounds failed: uninstalling it from `chrome://extensions` and installing a dropped folder with `Input.dispatchDragEvent` did nothing.
+  - The reload, restart and disabled-restart runs therefore used a copy of the recorder that **the owner installed by hand** with Load unpacked (Developer mode), on a fresh profile. That copy survived both restarts without being loaded again.
+- **Evidence:** the compact trace of the hand-installed run is committed as `tools/live-checks/group-move/traces/lifecycle.json`. The raw logs, including the runs against the CDP-loaded recorder, are kept locally.
+
+### Facts
+
+| What happened                                         | Recorder          | Session storage | `onInstalled` | `onStartup` | Notes                                                                                               |
+| ----------------------------------------------------- | ----------------- | --------------- | ------------- | ----------- | --------------------------------------------------------------------------------------------------- |
+| Worker stopped, then woken by a tab event             | loaded over CDP   | kept            | none          | none        | control: an ordinary idle stop                                                                      |
+| Extension reload (the Reload button's call)           | installed by hand | cleared         | `update`      | none        | new worker 64 ms after the call                                                                     |
+| Disable, then enable                                  | loaded over CDP   | cleared         | none          | none        |                                                                                                     |
+| Browser restart with session restore                  | installed by hand | cleared         | none          | **yes**     | delivered 87 ms after the worker's start-up code, before every restored window, tab and group event |
+| Disabled across a browser restart, enabled afterwards | installed by hand | cleared         | none          | **none**    | the missed start of decision 7                                                                      |
+
+Each row is one run.
+
+### Findings that bear on Phase B
+
+1. **R8's premise holds.** `storage.session` was cleared by a reload, by disable and enable, and by a browser restart, and kept across an ordinary worker stop. Overrides that should survive a reload (decision 7a) can't depend on it.
+2. **`onStartup` behaves as the plan assumes.** It fired at a browser start, and not on a reload (which fired `onInstalled` with reason `update`) or on an enable. A start that happened while the extension was disabled was never reported. So decision 7's exception is real: the tag would stay stale until the next start the extension handles.
+3. **At a browser restart, the worker's start-up code ran before `onStartup`, and `onStartup` came before every restored event.**
+   - **Event order:** the restored windows', tabs' and group's events were delivered in one burst within 1 ms, after `onStartup`. In this run, **no event handler ran before the gate could be set.**
+   - **What the start-up code could already see:** the worker's first `tabs.query({})` and `tabGroups.query({})` were issued 0.5 ms after its top-level code began. They resolved 86 ms later, about 0.6 ms **before** `onStartup` arrived. They returned the seven restored tabs (two of them grouped) and the restored group. So **start-up work can see restored groups before the gate is set.**
+   - This snapshot is kept in `traces/lifecycle.json` (the `worker-start` of the restart's instance).
+   - **Left open:** when the restored groups became visible within those 86 ms. A query resolving only shows the state by then, as with the Phase A snapshots.
+   - **The real gap is therefore the start-up pass, not event handlers.** Phase B's `initialize` task (reconciliation and legacy adoption) is queued by top-level code, so it can run before the gate is set and still see restored groups.
+   - The plan's "events handled before `onStartup` arrives" is reworded to say this. Codex's start-up recovery test covers the state such a pass can leave behind.
+4. **The startup gate is still worth keeping.** This is one run, and Chrome doesn't document the order. It confirms the gate covers the restored burst, but doesn't show the order is guaranteed.
+5. **Phase B's real Chrome check must use a hand-installed copy** for anything involving a reload or a restart (see the harness limit above).
+
+### Not covered
+
+- A Chrome Web Store update. Only the reload of an unpacked extension was checked; both fire `onInstalled` with reason `update`, but their timing may differ.
+- An update installed at a browser start.
+- A restart after a crash, or without session restore.
+- Repeat runs. Each row is one run, so the order in finding 3 is an observation, not a guarantee.
+- Windows, Linux and other Chromium browsers.
+
+Phase B has not started; it waits for the owner and Codex to review this record.
+
+
+## Branch check in real Chrome (Claude, 2026-11-24)
+
+Stage 6 of `fix/preserve-group-limits-on-window-move`: the branch's extension in a real Chrome, on the recorded scenarios, with the owner's drags, an extension reload and a browser restart.
+
+### Method
+
+- Chrome 158.0.8127.37 on macOS, throwaway profiles only.
+- `tools/live-checks/group-move/run.mjs --extension <copy>` loads a copy of `chrome-tab-limiter/` next to the recorder. Its `tl` route evaluates in the extension's own options page, so limits are saved with the popup's `setGroupLimit` command and read back with `getState`, `storage.local` and `storage.session`. The driver's `setupMove` and `move` split scenarios 1, 2, 3, 5 and 6 so a limit can be set between setup and move.
+- Each group's limit was set to put it over (2 for a group of 3; 1 for 4c's group of 2), so a lost limit would show as a missing constraint.
+- The reload and restart used a copy the owner installed with Load unpacked (a copy loaded over CDP is removed at a restart). The restart is the tool's quit and relaunch with `--restore-last-session`.
+- Whether the popup was open was polled every 0.3 s with `chrome.runtime.getContexts`, recording only times and window IDs, and matched against the recorder's event log.
+- Nothing recorded holds a URL or a title.
+
+### Results
+
+| Check                                     | How            | Result                                                                                                                    |
+| ----------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| s1: API move to an existing window        | script         | the limit of 2 followed: `group 3/2` at the destination, 3 tabs moved, badge 1, key kept                                  |
+| s1 with a limit that fits (4)             | script         | no decision at the destination                                                                                            |
+| s2: move to a new window                  | script         | `group 3/2` in the new window, 3 tabs moved                                                                               |
+| s3: a window's only group (source closes) | script         | source record gone, limit kept, `group 3/2` at the destination                                                            |
+| s5: tab created during the move           | script         | group moved; the tab, reported 12 ms after the group's arrival, waits as pending (window over)                            |
+| s6: worker stopped before the move        | script         | Chrome restarted the worker for the events; same result as s1                                                             |
+| 4a: drag the group into another window    | owner          | first run: the popup opened in Chrome's drag window and ended the drag (fixed: see the finding below); second run: as s1  |
+| 4b: tear the group off into a new window  | owner          | `group 3/2` in the new window, tabs moved (popup not observed)                                                            |
+| 4c: drag a window's only group            | owner          | after about ten hops (an accidental single-tab drag, several windows): source closed, limit kept, `group 2/1`, tabs moved |
+| 4d: drag 2 of 4 tabs out of the group     | owner          | the 2 tabs ungrouped and ordinary in the target; the group of 2 fits its limit of 2                                       |
+| Popup timing during a drag                | owner + poll   | no popup during a 6.8 s drag, including about 3 s over the target's tab strip; popup 0.34 s after the drop, in the target |
+| Extension reload                          | installed copy | session state rebuilt (startup mode), tag still "0", the limit still applies in the second window                         |
+| Browser restart, session restore          | installed copy | tag replaced by a random ID, old limit removed, restored group (new ID) has no custom limit, no marker left               |
+
+After every run, no arrival marker or open move was left in `tl_state`, apart from the expected short-lived open moves from windows closed by the driver's reset (a closed window reports its group removed, with no arrival; they expire after 10 s).
+
+### Finding: the popup ended a drag
+
+With its own limit following it, a group already over that limit made Chrome's temporary drag window over, and `chrome.action.openPopup` opened the popup there in the middle of the drag. The drag ended: the group stayed in the drag window for 77 s, and the owner could not drop it. Before this branch a drag window always had the default limit, so this could not happen. The unit tests decided correctly but could not show that opening the popup ends a real drag.
+
+The owner chose: a move does not open the popup in a window that holds nothing but the moving tabs (the drag window, or a window a group was just torn off into); the badge still counts it (recorded in `HUMAN-DECISION.md`, now `docs/decisions.md`). The fix landed with the rest of this branch, together with a regression test that replays the drag. The second run confirmed it, and showed that on this Chrome hovering over another window's tab strip does not attach the group there: it stays in the drag window until the drop, so a popup in a window with tabs of its own comes after the drop.
+
+### Not tested exactly as a person would
+
+- The restart was the tool quitting Chrome and starting it with `--restore-last-session`, not a person quitting and reopening it with "Continue where you left off".
+- The reload used `chrome.developerPrivate.reload`, which is what the Reload button calls, not a click on it.
+- Limits were set with the popup's command from the options page, not by typing them into the popup.
+- Scenarios 1, 2, 3, 5 and 6 moved groups with `chrome.tabGroups.move`; only 4a to 4d and the popup-timing run were real mouse drags.
+
+### Not covered
+
+- A worker stopped in the middle of a move, and the two restart cases in `CAVEATS.md`: only the mock tests cover them.
+- An extension disabled across a browser restart (the documented exception) was not repeated with the branch; the lifecycle record above shows that Chrome delivers no `onStartup` then.
+- Windows, Linux and other Chromium browsers.

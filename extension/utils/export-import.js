@@ -1,5 +1,24 @@
 // Export/Import utility functions for Tab Limiter extension
 
+// A group's custom limit is stored as groupOverride_<tag>_<groupId>, and only entries
+// under the current session tag (groupLimitSession, "0" when missing) apply. The key
+// format is owned by utils/group-overrides.js; this classic script (loaded before the
+// options module) can't import it, so it repeats the two rules it needs.
+function sessionTagOf(allData) {
+    const tag = allData.groupLimitSession;
+    return typeof tag === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(tag) ? tag : '0';
+}
+
+function parseGroupOverrideKey(key) {
+    const match = /^groupOverride_([A-Za-z0-9-]{1,64})_(\d{1,15})$/.exec(key);
+    return match ? { tag: match[1], groupId: Number(match[2]) } : null;
+}
+
+// A group's limit in the old window-keyed format (groupLimit_<windowId>_<groupId>) is
+// never applied: it is adopted at a worker start or removed. One left behind by a
+// failed cleanup is not exported or counted. groupLimit_<windowId>_ungrouped still is.
+const isLegacyGroupKey = (key) => /^groupLimit_\d{1,15}_\d{1,15}$/.test(key);
+
 // Debug logging configuration
 const EXPORT_DEBUG_MODE = false;
 
@@ -59,8 +78,22 @@ async function exportSettings() {
             return map.get(realId);
         };
         
+        // A group's custom limit applies only under the current session tag
+        const tag = sessionTagOf(allData);
+
         // Process all storage keys with ID anonymization
         for (const [key, value] of Object.entries(allData)) {
+            const override = parseGroupOverrideKey(key);
+            if (override) {
+                // A group's custom limit (stored by group ID, no window): anonymize the
+                // group ID. Entries from an earlier browser session no longer apply.
+                if (override.tag === tag) {
+                    exportData.settings.groupLimits[`groupLimit_${aliasFor(groupIdMap, String(override.groupId), 'group')}`] = value;
+                    groupCount++;
+                    customLimitCount++;
+                }
+                continue;
+            }
             if (key.startsWith('tabLimit_')) {
                 // Window-specific tab limits - anonymize window ID
                 const realWindowId = key.replace('tabLimit_', '');
@@ -69,8 +102,8 @@ async function exportSettings() {
 
                 exportData.settings.windowLimits[anonymizedWindowId] = value;
                 customLimitCount++;
-            } else if (key.startsWith('groupLimit_')) {
-                // Group-specific tab limits - anonymize group ID
+            } else if (key.startsWith('groupLimit_') && !isLegacyGroupKey(key)) {
+                // The window's limit for ungrouped tabs - anonymize the window ID
                 const parts = key.split('_');
                 if (parts.length >= 3) {
                     const realWindowId = parts[1];
@@ -101,8 +134,14 @@ async function exportSettings() {
 
 // Make storage.local hold exactly `data`. The new values are written before the
 // old keys are removed, so if the write fails nothing has been lost.
+//
+// It also starts a new session tag (groupLimitSession), in the same write as the new
+// settings. A group's custom limit applies only under the current tag, so no limit
+// from before the reset or import can apply again, including one the background was
+// saving at that moment under the old tag (plan R6).
 async function replaceStoredSettings(data) {
     const existing = await chrome.storage.local.get(null);
+    data = { ...data, groupLimitSession: crypto.randomUUID() };
     await chrome.storage.local.set(data);
     const stale = Object.keys(existing).filter((key) => !(key in data));
     if (stale.length > 0) {
@@ -309,11 +348,15 @@ async function getCurrentSettingsSummary() {
         };
         
         // Count different types of settings
+        const tag = sessionTagOf(allData);
         for (const key of Object.keys(allData)) {
-            if (key.startsWith('tabLimit_')) {
+            if (parseGroupOverrideKey(key)?.tag === tag) {
+                summary.groupLimits++;
+                summary.totalCustomSettings++;
+            } else if (key.startsWith('tabLimit_')) {
                 summary.windowLimits++;
                 summary.totalCustomSettings++;
-            } else if (key.startsWith('groupLimit_')) {
+            } else if (key.startsWith('groupLimit_') && !isLegacyGroupKey(key)) {
                 summary.groupLimits++;
                 summary.totalCustomSettings++;
             }

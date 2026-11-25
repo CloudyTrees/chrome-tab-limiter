@@ -22,6 +22,7 @@ utils/
   serial-queue.js      One queue: every event and command runs in order
   selection.js         Live feedback for the popup's tab picker
   storage.js           chrome.storage.local helpers
+  group-overrides.js   Group limits stored by group and browser session
   validation.js        Message validation for the background worker
   sanitize.js          HTML escaping and title sanitizing
   export-import.js     Settings backup utilities
@@ -58,18 +59,31 @@ Settings are stored in `chrome.storage.local` as flat keys:
 {
   "defaultTabLimit": 10,
   "tabLimit_<windowId>": 5,
-  "groupLimit_<windowId>_<groupId>": 4,
   "groupLimit_<windowId>_ungrouped": 6,
+  "groupOverride_<session>_<groupId>": 4,
+  "groupLimitSession": "<random ID>",
   "maxPendingPerWindow": 5,
   "hasSeenWelcome": true
 }
 ```
 
+A group's limit is stored by its group ID, with no window in the key, so it follows the group
+between windows. Chrome's group IDs are only unique within one browser session, so the key also
+names the session: `groupLimitSession` is a random ID that changes at every browser start, and when
+you reset or import settings. Only limits stored under the current one apply; older ones are removed
+in the background. Earlier versions stored a group's limit as `groupLimit_<windowId>_<groupId>`.
+Such a key is carried over once, and only if that group is still open in that window; otherwise it
+is removed.
+
 The decisions in progress are kept in `chrome.storage.session` under `tl_state`: window and tab IDs,
 which tabs are pending, moved or left over from startup, each window's allowance, a random operation
-ID, a revision number, and the count of rejected tabs. It holds **no URLs and no titles**. Session
-storage is in memory only: it survives a worker restart and is cleared when the browser exits or the
-extension is reloaded or updated, which is when startup mode begins again.
+ID, a revision number, and the count of rejected tabs. To recognise a move that happened while the
+background worker was stopped, it also keeps the window each tab was last seen in, and, for a few
+seconds while a group is moving, which tabs belong to that move. A short-lived marker
+(`tl_rotation_pending`) holds the new session ID while it is being saved after a browser start. None
+of it holds **URLs or titles**. Session storage is in memory only: it survives a worker restart and
+is cleared when the browser exits or the extension is reloaded or updated, which is when startup
+mode begins again.
 
 ## Unit tests
 

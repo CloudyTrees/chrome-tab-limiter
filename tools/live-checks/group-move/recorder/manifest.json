@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Limiter group-move event recorder (dev only)",
+  "version": "0.0.1",
+  "description": "Records tab, tab-group and window events with IDs and timings only. Never packaged.",
+  "permissions": ["tabs", "tabGroups", "storage", "unlimitedStorage"],
+  "background": { "service_worker": "background.js", "type": "module" }
+}
