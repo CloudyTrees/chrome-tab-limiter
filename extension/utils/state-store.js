@@ -17,8 +17,17 @@ export function createWindowState() {
     };
 }
 
+// `lastWindow` maps a tab ID to the window the tab was last settled in (R5). It sits
+// outside the window records, so it survives a window's record being deleted when
+// its last tab leaves. `arrivals` maps a tab ID to { window, at } for a tab that
+// arrived in that window by a move whose verdict can still change (R4): the tabs of
+// one group move are judged together when the move ends, even across a restart.
+// An arrival names the group move it belongs to (`group`). `openMoves` maps a group ID
+// to { from, at }: the window it left and when its tabGroups.onRemoved was handled, for
+// a group move that has started and not yet ended (tabGroups.onCreated). Absent fields
+// are read as {}.
 export function createState(startupMode) {
-    return { schema: SCHEMA_VERSION, startupMode: Boolean(startupMode), windows: {} };
+    return { schema: SCHEMA_VERSION, startupMode: Boolean(startupMode), windows: {}, lastWindow: {}, arrivals: {}, openMoves: {} };
 }
 
 const isIdList = (list) => Array.isArray(list) && list.every(Number.isSafeInteger);
@@ -59,6 +68,48 @@ function isIdAllowance(allowance) {
     );
 }
 
+function isTabWindowMap(map) {
+    return (
+        map !== null &&
+        typeof map === 'object' &&
+        !Array.isArray(map) &&
+        Object.entries(map).every(([tabId, windowId]) => /^\d{1,15}$/.test(tabId) && Number.isSafeInteger(windowId))
+    );
+}
+
+function isArrivalMap(map) {
+    return (
+        map !== null &&
+        typeof map === 'object' &&
+        !Array.isArray(map) &&
+        Object.entries(map).every(
+            ([tabId, arrival]) =>
+                /^\d{1,15}$/.test(tabId) &&
+                arrival !== null &&
+                typeof arrival === 'object' &&
+                Number.isSafeInteger(arrival.window) &&
+                Number.isSafeInteger(arrival.at) &&
+                Number.isSafeInteger(arrival.group)
+        )
+    );
+}
+
+function isOpenMoveMap(map) {
+    return (
+        map !== null &&
+        typeof map === 'object' &&
+        !Array.isArray(map) &&
+        Object.entries(map).every(
+            ([groupId, move]) =>
+                /^\d{1,15}$/.test(groupId) &&
+                move !== null &&
+                typeof move === 'object' &&
+                Number.isSafeInteger(move.from) &&
+                Number.isSafeInteger(move.at)
+        )
+    );
+}
+
 export function isValidState(state) {
     return (
         state !== null &&
@@ -67,7 +118,10 @@ export function isValidState(state) {
         typeof state.startupMode === 'boolean' &&
         state.windows !== null &&
         typeof state.windows === 'object' &&
-        Object.values(state.windows).every(isValidWindowState)
+        Object.values(state.windows).every(isValidWindowState) &&
+        (state.lastWindow === undefined || isTabWindowMap(state.lastWindow)) &&
+        (state.arrivals === undefined || isArrivalMap(state.arrivals)) &&
+        (state.openMoves === undefined || isOpenMoveMap(state.openMoves))
     );
 }
 

@@ -1,0 +1,62 @@
+{
+  "name": "s6",
+  "chrome": "Chrome/158.0.8127.37",
+  "notes": "worker stopped with ServiceWorker.stopWorker before begin",
+  "compactedFrom": "s6.json",
+  "dropped": "query snapshots (e_*_s) except at worker starts, the driver's final snapshot, events before the first marker",
+  "driverResult": {
+    "scenario": "s6 move while worker stopped",
+    "setup": {
+      "A": {
+        "windowId": 124397669,
+        "tabIds": [
+          124397670,
+          124397671,
+          124397672,
+          124397673
+        ]
+      },
+      "B": {
+        "windowId": 124397674,
+        "tabIds": [
+          124397675,
+          124397676
+        ]
+      },
+      "groupId": 1618418008,
+      "groupTabIds": [
+        124397670,
+        124397671,
+        124397672
+      ]
+    },
+    "result": {
+      "returned": {
+        "id": 1618418008,
+        "windowId": 124397674
+      }
+    }
+  },
+  "log": {
+    "m_1795144340431.500": {"abs":1795144340431.5,"label":"setup done","scenario":"s6 move while worker stopped","setup":{"A":{"tabIds":[124397670,124397671,124397672,124397673],"windowId":124397669},"B":{"tabIds":[124397675,124397676],"windowId":124397674},"groupId":1618418008,"groupTabIds":[124397670,124397671,124397672]}},
+    "m_1795144344373.400": {"abs":1795144344373.4,"label":"begin","scenario":"s6 move while worker stopped","setup":{"A":{"tabIds":[124397670,124397671,124397672,124397673],"windowId":124397669},"B":{"tabIds":[124397675,124397676],"windowId":124397674},"groupId":1618418008,"groupTabIds":[124397670,124397671,124397672]}},
+    "e_6ba0e7bc_000001": {"abs":1795144344405.3,"ev":"worker-start","instance":"6ba0e7bc","seq":1,"t":3.300000011920929,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000001_s": {"groups":{"issued":3.5,"issuedAbs":1795144344405.5,"list":[{"id":1618418008,"windowId":124397674}],"resolved":5.800000011920929,"resolvedAbs":1795144344407.8},"tabs":{"issued":3.5,"issuedAbs":1795144344405.5,"list":[{"groupId":-1,"id":124397566,"windowId":124397565},{"groupId":-1,"id":124397567,"windowId":124397565},{"groupId":-1,"id":124397673,"windowId":124397669},{"groupId":-1,"id":124397675,"windowId":124397674},{"groupId":-1,"id":124397676,"windowId":124397674},{"groupId":1618418008,"id":124397670,"windowId":124397674},{"groupId":1618418008,"id":124397671,"windowId":124397674},{"groupId":1618418008,"id":124397672,"windowId":124397674}],"resolved":6,"resolvedAbs":1795144344408}},
+    "e_6ba0e7bc_000002": {"abs":1795144344408.1,"ev":"tabGroups.onRemoved","groupId":1618418008,"instance":"6ba0e7bc","seq":2,"t":6.100000023841858,"timeOrigin":1795144344402,"windowId":124397669},
+    "e_6ba0e7bc_000003": {"abs":1795144344408.2,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"6ba0e7bc","seq":3,"t":6.200000017881393,"tabId":124397672,"timeOrigin":1795144344402,"windowId":124397669},
+    "e_6ba0e7bc_000004": {"abs":1795144344408.2,"ev":"tabs.onDetached","instance":"6ba0e7bc","oldPosition":2,"oldWindowId":124397669,"seq":4,"t":6.200000017881393,"tabId":124397672,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000005": {"abs":1795144344408.2,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"6ba0e7bc","seq":5,"t":6.200000017881393,"tabId":124397671,"timeOrigin":1795144344402,"windowId":124397669},
+    "e_6ba0e7bc_000006": {"abs":1795144344408.2,"ev":"tabs.onDetached","instance":"6ba0e7bc","oldPosition":1,"oldWindowId":124397669,"seq":6,"t":6.200000017881393,"tabId":124397671,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000007": {"abs":1795144344408.3,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"6ba0e7bc","seq":7,"t":6.300000011920929,"tabId":124397670,"timeOrigin":1795144344402,"windowId":124397669},
+    "e_6ba0e7bc_000008": {"abs":1795144344408.3,"ev":"tabs.onDetached","instance":"6ba0e7bc","oldPosition":0,"oldWindowId":124397669,"seq":8,"t":6.300000011920929,"tabId":124397670,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000009": {"abs":1795144344408.3,"ev":"tabs.onAttached","instance":"6ba0e7bc","newPosition":2,"newWindowId":124397674,"seq":9,"t":6.300000011920929,"tabId":124397670,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000010": {"abs":1795144344408.5,"ev":"tabs.onUpdated(groupId)","groupId":1618418008,"instance":"6ba0e7bc","seq":10,"t":6.5,"tabId":124397670,"timeOrigin":1795144344402,"windowId":124397674},
+    "e_6ba0e7bc_000011": {"abs":1795144344408.6,"ev":"tabs.onAttached","instance":"6ba0e7bc","newPosition":3,"newWindowId":124397674,"seq":11,"t":6.600000023841858,"tabId":124397671,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000012": {"abs":1795144344408.6,"ev":"tabs.onUpdated(groupId)","groupId":1618418008,"instance":"6ba0e7bc","seq":12,"t":6.600000023841858,"tabId":124397671,"timeOrigin":1795144344402,"windowId":124397674},
+    "e_6ba0e7bc_000013": {"abs":1795144344408.7,"ev":"tabs.onAttached","instance":"6ba0e7bc","newPosition":4,"newWindowId":124397674,"seq":13,"t":6.700000017881393,"tabId":124397672,"timeOrigin":1795144344402},
+    "e_6ba0e7bc_000014": {"abs":1795144344408.7,"ev":"tabs.onUpdated(groupId)","groupId":1618418008,"instance":"6ba0e7bc","seq":14,"t":6.700000017881393,"tabId":124397672,"timeOrigin":1795144344402,"windowId":124397674},
+    "e_6ba0e7bc_000015": {"abs":1795144344408.9,"ev":"tabGroups.onCreated","groupId":1618418008,"instance":"6ba0e7bc","seq":15,"t":6.9000000059604645,"timeOrigin":1795144344402,"windowId":124397674},
+    "e_6ba0e7bc_000016": {"abs":1795144344408.9,"ev":"tabGroups.onUpdated","groupId":1618418008,"instance":"6ba0e7bc","seq":16,"t":6.9000000059604645,"timeOrigin":1795144344402,"windowId":124397674},
+    "m_1795144346890.900": {"abs":1795144346890.9,"label":"end","scenario":"s6 move while worker stopped"}
+  }
+}

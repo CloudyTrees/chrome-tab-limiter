@@ -2,6 +2,7 @@
 import { escapeHtml } from './utils/sanitize.js';
 import { parseLimitInput } from './utils/validation.js';
 import { remainingNeeds, canCloseSelection } from './utils/selection.js';
+import { groupOverridesOf } from './utils/group-overrides.js';
 
 // Debug logging configuration
 const DEBUG_MODE = false; // Set to false in production
@@ -39,6 +40,11 @@ let welcomeNotice;
 
 // Current window ID
 let currentWindowId = null;
+// After a browser start, until the extension has started a new session for group
+// limits, no custom group limit applies (the background's startup gate)
+let groupLimitsPaused = false;
+// A refresh of the group list waits while a group row is being edited
+let groupListStale = false;
 
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
@@ -72,6 +78,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadInitialData();
     await refreshDecisionState();
     connectToBackground();
+    chrome.storage.onChanged.addListener(handleStoredLimitsChanged);
+    groupsListElement.addEventListener('focusout', handleGroupRowsFocusOut);
     await checkFirstRun();
 
     debugLog('Popup initialized');
@@ -401,19 +409,61 @@ function createGroupItemHTML(groupId, title, color, count, limit) {
     `;
 }
 
-// Get group limit from local storage
+// The limit that applies to a group now. A group's custom limit is stored by group
+// ID under the current session tag (utils/group-overrides.js), so it follows the
+// group between windows; the ungrouped limit belongs to this window.
 async function getGroupLimitLocal(groupId) {
     try {
-        const key = groupId === -1
-            ? `groupLimit_${currentWindowId}_ungrouped`
-            : `groupLimit_${currentWindowId}_${groupId}`;
-        const result = await chrome.storage.local.get([key, 'defaultTabLimit']);
+        const local = await chrome.storage.local.get(null);
+        const stored =
+            groupId === -1
+                ? local[`groupLimit_${currentWindowId}_ungrouped`]
+                : groupLimitsPaused
+                  ? undefined
+                  : groupOverridesOf(local)[groupId];
 
         // Only a whole number in range is ever shown; anything else falls back
         const asLimit = (value) => (Number.isInteger(value) && value >= 1 && value <= 100 ? value : null);
-        return asLimit(result[key]) ?? asLimit(result.defaultTabLimit) ?? 10;
+        return asLimit(stored) ?? asLimit(local.defaultTabLimit) ?? 10;
     } catch (error) {
         return 10;
+    }
+}
+
+// A limit changed (saved here, in another window's popup, or by the options page):
+// show the limits that apply now. A group row being edited is left alone.
+function handleStoredLimitsChanged(changes, area) {
+    if (area !== 'local') {
+        return;
+    }
+    const relevant = Object.keys(changes).some(
+        (key) => key === 'defaultTabLimit' || key === 'groupLimitSession' || key.startsWith('groupLimit_') || key.startsWith('groupOverride_')
+    );
+    if (relevant) {
+        refreshGroupList();
+    }
+}
+
+const isGroupInput = (element) => Boolean(element?.classList?.contains('group-limit-input'));
+const isInGroupRow = (element) => isGroupInput(element) || Boolean(element?.classList?.contains('group-save-btn'));
+
+// Show the limits that apply now, unless a group row is in use (a limit being typed,
+// or its Save button about to be clicked): then wait until the focus leaves the rows
+function refreshGroupList() {
+    if (isInGroupRow(document.activeElement)) {
+        groupListStale = true;
+        return;
+    }
+    groupListStale = false;
+    loadTabGroups();
+}
+
+// The focus left a group row. Moving to another row's input or Save button keeps
+// the wait: re-rendering then would drop the click or the value being typed.
+function handleGroupRowsFocusOut(event) {
+    if (groupListStale && !isInGroupRow(event.relatedTarget)) {
+        groupListStale = false;
+        loadTabGroups();
     }
 }
 
@@ -461,11 +511,13 @@ async function handleSaveGroupLimit(groupId) {
         button.disabled = true;
         button.textContent = 'Saving...';
 
-        // Save to storage
-        const key = groupId === -1
-            ? `groupLimit_${currentWindowId}_ungrouped`
-            : `groupLimit_${currentWindowId}_${groupId}`;
-        await chrome.storage.local.set({ [key]: limit });
+        // The background saves it, on the same queue as everything else that writes
+        // group limits. On a failure the typed value stays in the input.
+        const response = await send({ action: 'setGroupLimit', windowId: currentWindowId, groupId, limit });
+        if (!response.success) {
+            showMessage(response.error || 'Error saving group limit', 'error');
+            return;
+        }
 
         showMessage('Group limit saved', 'success');
         setTimeout(() => clearMessage(), 1500);
@@ -593,8 +645,23 @@ function connectToBackground() {
     }
 }
 
+function noteGroupLimitsPaused(paused) {
+    if (typeof paused === 'boolean' && paused !== groupLimitsPaused) {
+        groupLimitsPaused = paused;
+        refreshGroupList();
+    }
+}
+
 function handleBackgroundPush(message) {
-    if (message?.type !== 'state' || !decisionState) {
+    if (message?.type === 'groupLimits') {
+        noteGroupLimitsPaused(message.paused);
+        return;
+    }
+    if (message?.type !== 'state') {
+        return;
+    }
+    noteGroupLimitsPaused(message.groupLimitsPaused);
+    if (!decisionState) {
         return;
     }
     const current = decisionState.operation ? decisionState.operation.revision : null;
@@ -617,6 +684,7 @@ async function refreshDecisionState() {
 function applyDecisionState(state) {
     const previous = decisionState?.operation;
     decisionState = state;
+    noteGroupLimitsPaused(state.groupLimitsPaused);
     if (!state.operation || !previous || previous.opId !== state.operation.opId || previous.revision !== state.operation.revision) {
         selectedTabIds.clear(); // the tabs changed under the selection
     }

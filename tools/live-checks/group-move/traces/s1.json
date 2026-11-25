@@ -1,0 +1,59 @@
+{
+  "name": "s1",
+  "chrome": "Chrome/158.0.8127.37",
+  "notes": null,
+  "compactedFrom": "s1.json",
+  "dropped": "query snapshots (e_*_s) except at worker starts, the driver's final snapshot, events before the first marker",
+  "driverResult": {
+    "scenario": "s1 api move to existing window",
+    "setup": {
+      "A": {
+        "windowId": 124397568,
+        "tabIds": [
+          124397569,
+          124397570,
+          124397571,
+          124397572
+        ]
+      },
+      "B": {
+        "windowId": 124397573,
+        "tabIds": [
+          124397574,
+          124397575
+        ]
+      },
+      "groupId": 617140416,
+      "groupTabIds": [
+        124397569,
+        124397570,
+        124397571
+      ]
+    },
+    "result": {
+      "returned": {
+        "id": 617140416,
+        "windowId": 124397573
+      }
+    }
+  },
+  "log": {
+    "m_1795144260599.100": {"abs":1795144260599.0999,"label":"begin","scenario":"s1 api move to existing window","setup":{"A":{"tabIds":[124397569,124397570,124397571,124397572],"windowId":124397568},"B":{"tabIds":[124397574,124397575],"windowId":124397573},"groupId":617140416,"groupTabIds":[124397569,124397570,124397571]}},
+    "e_645b6fcf_000016": {"abs":1795144260603.7,"ev":"tabGroups.onRemoved","groupId":617140416,"instance":"645b6fcf","seq":16,"t":9118.5,"timeOrigin":1795144251485.2,"windowId":124397568},
+    "e_645b6fcf_000017": {"abs":1795144260609.5,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"645b6fcf","seq":17,"t":9124.300000011921,"tabId":124397571,"timeOrigin":1795144251485.2,"windowId":124397568},
+    "e_645b6fcf_000018": {"abs":1795144260609.7,"ev":"tabs.onDetached","instance":"645b6fcf","oldPosition":2,"oldWindowId":124397568,"seq":18,"t":9124.5,"tabId":124397571,"timeOrigin":1795144251485.2},
+    "e_645b6fcf_000019": {"abs":1795144260609.7,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"645b6fcf","seq":19,"t":9124.5,"tabId":124397570,"timeOrigin":1795144251485.2,"windowId":124397568},
+    "e_645b6fcf_000020": {"abs":1795144260609.7,"ev":"tabs.onDetached","instance":"645b6fcf","oldPosition":1,"oldWindowId":124397568,"seq":20,"t":9124.5,"tabId":124397570,"timeOrigin":1795144251485.2},
+    "e_645b6fcf_000021": {"abs":1795144260609.8,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"645b6fcf","seq":21,"t":9124.59999999404,"tabId":124397569,"timeOrigin":1795144251485.2,"windowId":124397568},
+    "e_645b6fcf_000022": {"abs":1795144260609.9,"ev":"tabs.onDetached","instance":"645b6fcf","oldPosition":0,"oldWindowId":124397568,"seq":22,"t":9124.699999988079,"tabId":124397569,"timeOrigin":1795144251485.2},
+    "e_645b6fcf_000023": {"abs":1795144260614.7,"ev":"tabs.onAttached","instance":"645b6fcf","newPosition":2,"newWindowId":124397573,"seq":23,"t":9129.5,"tabId":124397569,"timeOrigin":1795144251485.2},
+    "e_645b6fcf_000024": {"abs":1795144260614.9,"ev":"tabs.onUpdated(groupId)","groupId":617140416,"instance":"645b6fcf","seq":24,"t":9129.699999988079,"tabId":124397569,"timeOrigin":1795144251485.2,"windowId":124397573},
+    "e_645b6fcf_000025": {"abs":1795144260614.9,"ev":"tabs.onAttached","instance":"645b6fcf","newPosition":3,"newWindowId":124397573,"seq":25,"t":9129.699999988079,"tabId":124397570,"timeOrigin":1795144251485.2},
+    "e_645b6fcf_000026": {"abs":1795144260615,"ev":"tabs.onUpdated(groupId)","groupId":617140416,"instance":"645b6fcf","seq":26,"t":9129.800000011921,"tabId":124397570,"timeOrigin":1795144251485.2,"windowId":124397573},
+    "e_645b6fcf_000027": {"abs":1795144260615.0999,"ev":"tabs.onAttached","instance":"645b6fcf","newPosition":4,"newWindowId":124397573,"seq":27,"t":9129.90000000596,"tabId":124397571,"timeOrigin":1795144251485.2},
+    "e_645b6fcf_000028": {"abs":1795144260615.0999,"ev":"tabs.onUpdated(groupId)","groupId":617140416,"instance":"645b6fcf","seq":28,"t":9129.90000000596,"tabId":124397571,"timeOrigin":1795144251485.2,"windowId":124397573},
+    "e_645b6fcf_000029": {"abs":1795144260615.8,"ev":"tabGroups.onCreated","groupId":617140416,"instance":"645b6fcf","seq":29,"t":9130.59999999404,"timeOrigin":1795144251485.2,"windowId":124397573},
+    "e_645b6fcf_000030": {"abs":1795144260615.8,"ev":"tabGroups.onUpdated","groupId":617140416,"instance":"645b6fcf","seq":30,"t":9130.59999999404,"timeOrigin":1795144251485.2,"windowId":124397573},
+    "m_1795144263118.000": {"abs":1795144263118,"label":"end","scenario":"s1 api move to existing window"}
+  }
+}

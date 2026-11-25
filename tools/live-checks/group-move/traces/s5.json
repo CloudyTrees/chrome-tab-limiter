@@ -1,0 +1,78 @@
+{
+  "name": "s5",
+  "chrome": "Chrome/158.0.8127.37",
+  "notes": null,
+  "compactedFrom": "s5.json",
+  "dropped": "query snapshots (e_*_s) except at worker starts, the driver's final snapshot, events before the first marker",
+  "driverResult": {
+    "scenario": "s5 creations in the destination around a move",
+    "setup": {
+      "A": {
+        "windowId": 124397612,
+        "tabIds": [
+          124397613,
+          124397614,
+          124397615,
+          124397616
+        ]
+      },
+      "B": {
+        "windowId": 124397617,
+        "tabIds": [
+          124397618,
+          124397619
+        ]
+      },
+      "groupId": 997771734,
+      "groupTabIds": [
+        124397613,
+        124397614,
+        124397615
+      ]
+    },
+    "result": {
+      "returned": {
+        "id": 997771734,
+        "windowId": 124397617
+      },
+      "createdDuring": {
+        "id": 124397620,
+        "windowId": 124397617,
+        "groupId": -1
+      },
+      "createdAfter": {
+        "id": 124397621,
+        "windowId": 124397617,
+        "groupId": -1
+      },
+      "addedToMovedGroup": {
+        "id": 124397622,
+        "groupIdReturned": 997771734
+      }
+    }
+  },
+  "log": {
+    "m_1795144309291.400": {"abs":1795144309291.4,"label":"begin","scenario":"s5 creations in the destination around a move","setup":{"A":{"tabIds":[124397613,124397614,124397615,124397616],"windowId":124397612},"B":{"tabIds":[124397618,124397619],"windowId":124397617},"groupId":997771734,"groupTabIds":[124397613,124397614,124397615]}},
+    "e_28d6acd5_000104": {"abs":1795144309292.9001,"ev":"tabGroups.onRemoved","groupId":997771734,"instance":"28d6acd5","seq":104,"t":12711.600000023842,"timeOrigin":1795144296581.3,"windowId":124397612},
+    "e_28d6acd5_000105": {"abs":1795144309297.3,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"28d6acd5","seq":105,"t":12716,"tabId":124397615,"timeOrigin":1795144296581.3,"windowId":124397612},
+    "e_28d6acd5_000106": {"abs":1795144309297.4001,"ev":"tabs.onDetached","instance":"28d6acd5","oldPosition":2,"oldWindowId":124397612,"seq":106,"t":12716.100000023842,"tabId":124397615,"timeOrigin":1795144296581.3},
+    "e_28d6acd5_000107": {"abs":1795144309297.4001,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"28d6acd5","seq":107,"t":12716.100000023842,"tabId":124397614,"timeOrigin":1795144296581.3,"windowId":124397612},
+    "e_28d6acd5_000108": {"abs":1795144309297.5,"ev":"tabs.onDetached","instance":"28d6acd5","oldPosition":1,"oldWindowId":124397612,"seq":108,"t":12716.200000017881,"tabId":124397614,"timeOrigin":1795144296581.3},
+    "e_28d6acd5_000109": {"abs":1795144309297.5,"ev":"tabs.onUpdated(groupId)","groupId":-1,"instance":"28d6acd5","seq":109,"t":12716.200000017881,"tabId":124397613,"timeOrigin":1795144296581.3,"windowId":124397612},
+    "e_28d6acd5_000110": {"abs":1795144309297.5,"ev":"tabs.onDetached","instance":"28d6acd5","oldPosition":0,"oldWindowId":124397612,"seq":110,"t":12716.200000017881,"tabId":124397613,"timeOrigin":1795144296581.3},
+    "e_28d6acd5_000111": {"abs":1795144309302.2,"ev":"tabs.onAttached","instance":"28d6acd5","newPosition":2,"newWindowId":124397617,"seq":111,"t":12720.90000000596,"tabId":124397613,"timeOrigin":1795144296581.3},
+    "e_28d6acd5_000112": {"abs":1795144309302.3,"ev":"tabs.onUpdated(groupId)","groupId":997771734,"instance":"28d6acd5","seq":112,"t":12721,"tabId":124397613,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000113": {"abs":1795144309302.3,"ev":"tabs.onAttached","instance":"28d6acd5","newPosition":3,"newWindowId":124397617,"seq":113,"t":12721,"tabId":124397614,"timeOrigin":1795144296581.3},
+    "e_28d6acd5_000114": {"abs":1795144309302.3,"ev":"tabs.onUpdated(groupId)","groupId":997771734,"instance":"28d6acd5","seq":114,"t":12721,"tabId":124397614,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000115": {"abs":1795144309302.4001,"ev":"tabs.onAttached","instance":"28d6acd5","newPosition":4,"newWindowId":124397617,"seq":115,"t":12721.100000023842,"tabId":124397615,"timeOrigin":1795144296581.3},
+    "e_28d6acd5_000116": {"abs":1795144309302.4001,"ev":"tabs.onUpdated(groupId)","groupId":997771734,"instance":"28d6acd5","seq":116,"t":12721.100000023842,"tabId":124397615,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000117": {"abs":1795144309303.3,"ev":"tabGroups.onCreated","groupId":997771734,"instance":"28d6acd5","seq":117,"t":12722,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000118": {"abs":1795144309303.4001,"ev":"tabGroups.onUpdated","groupId":997771734,"instance":"28d6acd5","seq":118,"t":12722.100000023842,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000119": {"abs":1795144309321,"ev":"tabs.onCreated","groupId":-1,"instance":"28d6acd5","seq":119,"t":12739.700000017881,"tabId":124397620,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000120": {"abs":1795144309331.3,"ev":"tabs.onCreated","groupId":-1,"instance":"28d6acd5","seq":120,"t":12750,"tabId":124397621,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000121": {"abs":1795144309337.3,"ev":"tabs.onCreated","groupId":-1,"instance":"28d6acd5","seq":121,"t":12756,"tabId":124397622,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000122": {"abs":1795144309340.7,"ev":"tabs.onUpdated(groupId)","groupId":997771734,"instance":"28d6acd5","seq":122,"t":12759.40000000596,"tabId":124397622,"timeOrigin":1795144296581.3,"windowId":124397617},
+    "e_28d6acd5_000123": {"abs":1795144309340.8,"ev":"tabs.onMoved","fromIndex":7,"instance":"28d6acd5","seq":123,"t":12759.5,"tabId":124397622,"timeOrigin":1795144296581.3,"toIndex":5,"windowId":124397617},
+    "m_1795144311842.300": {"abs":1795144311842.3,"label":"end","scenario":"s5 creations in the destination around a move"}
+  }
+}

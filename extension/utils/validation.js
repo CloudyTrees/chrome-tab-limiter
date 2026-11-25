@@ -6,7 +6,8 @@ export const VALID_ACTIONS = Object.freeze([
     'closeSelected',
     'closePending',
     'keepThese',
-    'startEnforcing'
+    'startEnforcing',
+    'setGroupLimit'
 ]);
 
 // Accept messages only from this extension's own pages (popup, options).
@@ -27,7 +28,8 @@ const REQUIRED_FIELDS = Object.freeze({
     closeSelected: ['windowId', 'opId', 'revision', 'tabIds'],
     closePending: ['windowId', 'opId', 'revision'],
     keepThese: ['windowId', 'opId', 'revision'],
-    startEnforcing: []
+    startEnforcing: [],
+    setGroupLimit: ['windowId', 'groupId', 'limit']
 });
 
 // Validate the shape of a runtime message before acting on it
@@ -57,6 +59,15 @@ export function validateMessageRequest(request) {
 
     if (request.revision !== undefined && !(Number.isSafeInteger(request.revision) && request.revision >= 0)) {
         return { valid: false, error: 'Invalid revision' };
+    }
+
+    // A tab group ID, or -1 for the window's ungrouped tabs
+    if (request.groupId !== undefined && !(Number.isSafeInteger(request.groupId) && request.groupId >= -1)) {
+        return { valid: false, error: 'Invalid group ID' };
+    }
+
+    if (request.limit !== undefined && !(Number.isInteger(request.limit) && request.limit >= 1 && request.limit <= 100)) {
+        return { valid: false, error: 'Invalid limit' };
     }
 
     if (request.tabIds !== undefined) {

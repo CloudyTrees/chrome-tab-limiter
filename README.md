@@ -42,6 +42,13 @@ and the popup tells you how many.
 To limit a tab group, set its limit in the same popup. Ungrouped tabs have their own limit. Each
 group, and the ungrouped tabs, use the default limit unless you override it.
 
+A group's limit belongs to the group, not to the window it is in. If you move the whole group to
+another window (by dragging it, or with *Move group to new window*), its limit goes with it, even
+when the old window then closes. The new window's own limit still applies. A window's limit and its
+limit for ungrouped tabs stay with that window. Group limits last for the browser session: after a
+browser restart, Chrome gives restored groups new identities, so they use the default limit until
+you set one again. Reloading or updating the extension keeps them.
+
 **When a limit is exceeded.** The new tab stays open and the popup lists every tab in the window.
 
 1. Tick the tabs to close and click *Close selected tabs*. The button turns on only when closing
@@ -50,7 +57,10 @@ group, and the ungrouped tabs, use the default limit unless you override it.
 3. Or click *Decide later*. Nothing changes and nothing times out.
 
 A tab you drag into a window or group that is full counts toward the excess and asks you the same
-question, but it is never closed automatically.
+question, but it is never closed automatically. The same holds for a whole group you move into a
+window: if it puts that window (or the group itself) over a limit, its tabs are flagged as moved for
+you to review, and nothing is closed. A tab you had opened in that window just before the group
+arrived is judged on the window as it was when you opened it.
 
 **After a browser start.** Restored windows may already be over their limits. Until your first
 decision, tabs over a limit are kept and the badge shows the excess. In the popup you can:
